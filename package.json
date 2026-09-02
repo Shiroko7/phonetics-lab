@@ -1,0 +1,31 @@
+{
+  "name": "phonetics-lab",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Paste English text, get IPA phonetics on hover plus pronunciation audio.",
+  "scripts": {
+    "dict": "node scripts/build-dict.mjs",
+    "common": "node scripts/build-common.mjs",
+    "check": "node scripts/check.mjs",
+    "dev": "concurrently -n web,api -c cyan,magenta \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:web": "vite",
+    "dev:api": "uv run --directory backend uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --reload-dir app",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "clean": "node -e \"for (const p of ['dist','tsconfig.tsbuildinfo']) require('fs').rmSync(p,{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^10.0.5",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.12"
+  }
+}

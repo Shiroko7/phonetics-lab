@@ -1,0 +1,11 @@
+node_modules
+dist
+.vite
+scripts/.cache
+scratch-*.mjs
+tsconfig.tsbuildinfo
+
+# backend
+backend/.venv
+__pycache__
+*.pyc

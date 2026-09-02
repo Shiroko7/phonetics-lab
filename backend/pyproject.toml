@@ -1,0 +1,32 @@
+[project]
+name = "phonetics-lab-backend"
+version = "0.1.0"
+description = "Forced-alignment and goodness-of-pronunciation scoring for phonetics-lab."
+requires-python = ">=3.12"
+
+dependencies = [
+    "torch>=2.7",
+    "torchaudio>=2.7",
+    "transformers>=4.44",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "python-multipart>=0.0.12",
+    "soundfile>=0.12",
+    "numpy>=1.26",
+    "praat-parselmouth>=0.4.5",
+]
+
+# Blackwell (RTX 50xx) is compute capability sm_120. The default PyPI wheels are
+# built against an older CUDA that has no kernels for it, so the GPU loads and
+# then fails at the first matmul. cu128 is the floor for this card.
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128" }]
+torchaudio = [{ index = "pytorch-cu128" }]
+
+[tool.uv]
+package = false
