@@ -102,6 +102,7 @@ export function findDrills(
   phone: string,
   insteadOf?: string,
   limit = 5,
+  options?: { randomize?: boolean },
 ): Drill[] {
   const found: { drill: Drill; cost: number }[] = []
   const plain: Entry[] = []
@@ -123,24 +124,65 @@ export function findDrills(
 
   found.sort((a, b) => a.cost - b.cost)
 
+  const candidatePairs: Drill[] = []
+  const pairUsed = new Set<string>()
+  for (const { drill } of found) {
+    if (pairUsed.has(drill.word) || pairUsed.has(drill.contrast!.word)) continue
+    pairUsed.add(drill.word)
+    pairUsed.add(drill.contrast!.word)
+    candidatePairs.push(drill)
+    if (candidatePairs.length >= limit * 4) break
+  }
+
   const drills: Drill[] = []
   const used = new Set<string>()
-  for (const { drill } of found) {
-    if (drills.length >= limit) break
-    if (used.has(drill.word) || used.has(drill.contrast!.word)) continue
-    used.add(drill.word)
-    used.add(drill.contrast!.word)
-    drills.push(drill)
+
+  if (options?.randomize && candidatePairs.length > limit) {
+    // Pick randomly from the top candidate pairs
+    const pool = candidatePairs.slice()
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[pool[i], pool[j]] = [pool[j], pool[i]]
+    }
+    for (const drill of pool) {
+      if (drills.length >= limit) break
+      used.add(drill.word)
+      used.add(drill.contrast!.word)
+      drills.push(drill)
+    }
+  } else {
+    for (const drill of candidatePairs) {
+      if (drills.length >= limit) break
+      used.add(drill.word)
+      used.add(drill.contrast!.word)
+      drills.push(drill)
+    }
   }
 
   // Pairs are the point; plain examples only make up the shortfall, short ones
   // first so the sound is not buried in four other syllables.
   const short = plain.filter((entry) => entry.phones.length <= 6)
-  for (const entry of (short.length >= limit ? short : plain)) {
-    if (drills.length >= limit) break
-    if (used.has(entry.word)) continue
-    used.add(entry.word)
-    drills.push({ word: entry.word, ipa: entry.ipa })
+  const plainCandidates = (short.length >= limit ? short : plain).slice(0, limit * 4)
+
+  if (options?.randomize && plainCandidates.length > limit - drills.length) {
+    const pool = plainCandidates.slice()
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[pool[i], pool[j]] = [pool[j], pool[i]]
+    }
+    for (const entry of pool) {
+      if (drills.length >= limit) break
+      if (used.has(entry.word)) continue
+      used.add(entry.word)
+      drills.push({ word: entry.word, ipa: entry.ipa })
+    }
+  } else {
+    for (const entry of plainCandidates) {
+      if (drills.length >= limit) break
+      if (used.has(entry.word)) continue
+      used.add(entry.word)
+      drills.push({ word: entry.word, ipa: entry.ipa })
+    }
   }
 
   return drills

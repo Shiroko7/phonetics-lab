@@ -127,6 +127,18 @@ export function WordCard({ pron, anchor, display, onPlay, onEnter, onLeave }: Pr
         </div>
       )}
 
+      {pron.connectedNote && (
+        <div className="card-connected-note">
+          <div className="connected-tag">CONNECTED SPEECH</div>
+          <p className="connected-desc">{pron.connectedNote}</p>
+          {pron.spellingNote && (
+            <div className="connected-spelling">
+              <strong>Spelling vs sound:</strong> {pron.spellingNote}
+            </div>
+          )}
+        </div>
+      )}
+
       {pron.note && <div className="card-note">{pron.note}</div>}
     </div>
   )

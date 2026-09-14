@@ -20,6 +20,9 @@ export interface TargetWord {
   text: string
   ipa: string
   phones: string[]
+  variants?: string[]
+  connectedNote?: string
+  spellingNote?: string
 }
 
 export type Verdict = 'good' | 'ok' | 'poor'
@@ -40,6 +43,8 @@ export interface WordReport {
   span: { start: number; end: number } | null
   score: number
   verdict: Verdict
+  connectedNote?: string
+  spellingNote?: string
 }
 
 /**
@@ -58,6 +63,9 @@ export function targetWords(phrase: string, dict: Dictionary): TargetWord[] {
       text: token.text,
       ipa: token.pron!.ipa,
       phones: expectedPhones(token.pron!.ipa),
+      variants: token.pron!.variants,
+      connectedNote: token.pron!.connectedNote,
+      spellingNote: token.pron!.spellingNote,
     }))
     .filter((word) => word.phones.length > 0)
 }
@@ -65,6 +73,25 @@ export function targetWords(phrase: string, dict: Dictionary): TargetWord[] {
 /** Every expected phone, in order — what the alignment actually compares. */
 export function flatten(words: TargetWord[]): string[] {
   return words.flatMap((word) => word.phones)
+}
+
+/** Map of expected phone index -> set of allowed variant phones for that slot (e.g. weak vs citation forms). */
+export function extractVariantMap(words: TargetWord[]): Map<number, Set<string>> {
+  const map = new Map<number, Set<string>>()
+  let phoneOffset = 0
+  for (const word of words) {
+    if (word.variants && word.variants.length > 1) {
+      const alternatePhones = new Set<string>()
+      for (const v of word.variants) {
+        for (const p of expectedPhones(v)) alternatePhones.add(p)
+      }
+      for (let p = 0; p < word.phones.length; p++) {
+        map.set(phoneOffset + p, alternatePhones)
+      }
+    }
+    phoneOffset += word.phones.length
+  }
+  return map
 }
 
 /** Cut the alignment back into words and score each one. */
@@ -89,10 +116,12 @@ export function byWord(words: TargetWord[], aligned: AlignedPhone[]): WordReport
       text: word.text,
       ipa: word.ipa,
       steps,
-      said: steps.map((step) => step.actual ?? '').join(''),
+      said: steps.map((step) => step.actual ?? '').filter(Boolean).join(' '),
       span: spanOf(steps),
       score,
       verdict: verdictFor(steps),
+      connectedNote: word.connectedNote,
+      spellingNote: word.spellingNote,
     }
   })
 }

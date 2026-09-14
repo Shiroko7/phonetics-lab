@@ -133,16 +133,39 @@ const ALLOPHONES: [string, string][] = [
 
 const EQUIVALENT = new Set(ALLOPHONES.flatMap(([a, b]) => [`${a}|${b}`, `${b}|${a}`]))
 
-function verdictFor(expected: string, actual: string, distance: number): Verdict {
+function effectiveDistance(
+  expected: string,
+  actual: string,
+  index: number,
+  allowedVariants?: Map<number, Set<string>>,
+): number {
+  if (expected === actual || EQUIVALENT.has(`${expected}|${actual}`)) return 0
+  const variants = allowedVariants?.get(index)
+  if (variants && variants.has(actual)) return 0
+  return phoneDistance(expected, actual)
+}
+
+function verdictFor(
+  expected: string,
+  actual: string,
+  distance: number,
+  allowedVariants?: Set<string>,
+): Verdict {
   if (expected === actual || EQUIVALENT.has(`${expected}|${actual}`)) return 'correct'
+  if (allowedVariants && allowedVariants.has(actual)) return 'correct'
   return distance < CLOSE_BELOW ? 'close' : 'wrong'
 }
 
 /**
  * Needleman-Wunsch over phones, scored by articulatory similarity.
  * Substituting a similar sound costs little; a gap costs a fixed penalty.
+ * Also accepts contextual connected-speech variants (e.g. weak forms of function words).
  */
-export function alignPhones(expected: string[], actual: Heard[]): AlignedPhone[] {
+export function alignPhones(
+  expected: string[],
+  actual: Heard[],
+  allowedVariants?: Map<number, Set<string>>,
+): AlignedPhone[] {
   const n = expected.length
   const m = actual.length
 
@@ -154,7 +177,7 @@ export function alignPhones(expected: string[], actual: Heard[]): AlignedPhone[]
   for (let i = 1; i <= n; i++) {
     for (let j = 1; j <= m; j++) {
       score[i][j] = Math.min(
-        score[i - 1][j - 1] + phoneDistance(expected[i - 1], actual[j - 1].phone),
+        score[i - 1][j - 1] + effectiveDistance(expected[i - 1], actual[j - 1].phone, i - 1, allowedVariants),
         score[i - 1][j] + GAP_PENALTY,
         score[i][j - 1] + GAP_PENALTY,
       )
@@ -165,11 +188,15 @@ export function alignPhones(expected: string[], actual: Heard[]): AlignedPhone[]
   let i = n
   let j = m
   while (i > 0 || j > 0) {
-    const diagonal =
-      i > 0 && j > 0 && score[i][j] === score[i - 1][j - 1] + phoneDistance(expected[i - 1], actual[j - 1].phone)
+    const cost =
+      i > 0 && j > 0
+        ? effectiveDistance(expected[i - 1], actual[j - 1].phone, i - 1, allowedVariants)
+        : Infinity
+    const diagonal = i > 0 && j > 0 && score[i][j] === score[i - 1][j - 1] + cost
     if (diagonal) {
       const said = actual[j - 1]
-      const distance = phoneDistance(expected[i - 1], said.phone)
+      const distance = cost
+      const variantsForSlot = allowedVariants?.get(i - 1)
       out.push({
         expected: expected[i - 1],
         actual: said.phone,
@@ -177,7 +204,7 @@ export function alignPhones(expected: string[], actual: Heard[]): AlignedPhone[]
         expectedIndex: i - 1,
         start: said.start,
         end: said.end,
-        verdict: verdictFor(expected[i - 1], said.phone, distance),
+        verdict: verdictFor(expected[i - 1], said.phone, distance, variantsForSlot),
       })
       i--
       j--

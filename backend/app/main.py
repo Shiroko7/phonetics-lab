@@ -60,7 +60,11 @@ def health() -> Health:
 
 
 def free_decode(
-    log_probs: np.ndarray, inventory: phones.Inventory, seconds_per_frame: float, blank: int
+    log_probs: np.ndarray,
+    inventory: phones.Inventory,
+    seconds_per_frame: float,
+    blank: int,
+    offset_seconds: float = 0.0,
 ) -> list[HeardPhone]:
     """
     Greedy CTC over the same logits: best id per frame, runs collapsed, blanks
@@ -78,8 +82,8 @@ def free_decode(
                 out.append(
                     HeardPhone(
                         phone=phone,
-                        start=round(frame * seconds_per_frame, 3),
-                        end=round((frame + 1) * seconds_per_frame, 3),
+                        start=round(offset_seconds + frame * seconds_per_frame, 3),
+                        end=round(offset_seconds + (frame + 1) * seconds_per_frame, 3),
                     )
                 )
         previous = token_id
@@ -102,9 +106,11 @@ async def analyze(
 
     raw = await audio_file.read()
     try:
-        samples = audio.trim_silence(audio.read_wav(raw))
+        samples, start_offset = audio.trim_silence(audio.read_wav(raw))
     except ValueError as err:
         raise HTTPException(400, str(err)) from err
+
+    offset_seconds = start_offset / audio.TARGET_SAMPLE_RATE
 
     info = audio.measure(samples)
     if info["peak"] < 0.02:
@@ -153,8 +159,8 @@ async def analyze(
                     posterior=round(entry.posterior, 4),
                     heard=heard if verdict in ("close", "wrong") else None,
                     heard_posterior=round(entry.runner_up_posterior, 4),
-                    start=round(entry.start_frame * seconds_per_frame, 3),
-                    end=round(entry.end_frame * seconds_per_frame, 3),
+                    start=round(offset_seconds + entry.start_frame * seconds_per_frame, 3),
+                    end=round(offset_seconds + entry.end_frame * seconds_per_frame, 3),
                 )
             )
 
@@ -162,7 +168,9 @@ async def analyze(
 
     return AnalyzeResponse(
         phones=results,
-        free=free_decode(log_probs, model.inventory, seconds_per_frame, model.blank),
+        free=free_decode(
+            log_probs, model.inventory, seconds_per_frame, model.blank, offset_seconds
+        ),
         overall=overall,
         audio=AudioInfo(**info),
         seconds_per_frame=round(seconds_per_frame, 6),
@@ -174,7 +182,7 @@ async def analyze(
 async def transcribe(audio_file: UploadFile = File(..., alias="audio")) -> TranscribeResponse:
     raw = await audio_file.read()
     try:
-        samples = audio.trim_silence(audio.read_wav(raw))
+        samples, _ = audio.trim_silence(audio.read_wav(raw))
     except ValueError as err:
         raise HTTPException(400, str(err)) from err
 

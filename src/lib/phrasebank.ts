@@ -75,6 +75,7 @@ export function phrasesFor(
   phone: string,
   insteadOf?: string,
   limit = 3,
+  options?: { randomize?: boolean },
 ): DrillPhrase[] {
   return index
     .filter((phrase) => phrase.counts.has(phone))
@@ -87,6 +88,9 @@ export function phrasesFor(
       rank += Math.min(phrase.counts.get(phone) ?? 0, 4)
       // Between two equally apt lines, the shorter one is the better drill.
       rank -= phrase.length / 40
+      if (options?.randomize) {
+        rank += (Math.random() - 0.5) * 1.5
+      }
       return { phrase, rank }
     })
     .sort((a, b) => b.rank - a.rank)
@@ -116,6 +120,11 @@ const CONTEXTS = 2
 /** What a line written for the sound is worth over one that merely contains it. */
 const DELIBERATE = 6
 
+export interface BuildDrillOptions {
+  /** If true, picks randomly among top contenders for fresh drill variety on each session. */
+  randomize?: boolean
+}
+
 /**
  * Build a session covering every sound asked for.
  *
@@ -129,7 +138,12 @@ const DELIBERATE = 6
  * The first phrase chosen is the one doing the most work, which is also the
  * right one to open with.
  */
-export function buildDrill(index: DrillPhrase[], wanted: string[], limit = 8): DrillSet {
+export function buildDrill(
+  index: DrillPhrase[],
+  wanted: string[],
+  limit = 8,
+  options?: BuildDrillOptions,
+): DrillSet {
   const targets = [...new Set(wanted)]
 
   // Contexts still owed, and whether a line written for the sound is still owed.
@@ -142,8 +156,8 @@ export function buildDrill(index: DrillPhrase[], wanted: string[], limit = 8): D
   const used = new Set<string>()
 
   while (steps.length < limit && outstanding()) {
-    let best: DrillPhrase | null = null
-    let bestGain = 0
+    const candidates: { phrase: DrillPhrase; gain: number }[] = []
+    let maxGain = 0
 
     for (const phrase of index) {
       if (used.has(phrase.text)) continue
@@ -157,16 +171,24 @@ export function buildDrill(index: DrillPhrase[], wanted: string[], limit = 8): D
         if (written && (owedFocus.get(phone) ?? 0) > 0) gain += DELIBERATE + worth
         else if ((owed.get(phone) ?? 0) > 0) gain += written ? worth * 3 : worth
       }
-      if (gain === 0) continue
+      if (gain <= 0) continue
       // Prefer the shorter line when two do the same work.
       gain -= phrase.length / 100
-      if (gain > bestGain) {
-        bestGain = gain
-        best = phrase
-      }
+      if (gain > maxGain) maxGain = gain
+      candidates.push({ phrase, gain })
     }
 
-    if (!best) break
+    if (candidates.length === 0 || maxGain <= 0) break
+
+    let best: DrillPhrase | null = null
+    if (options?.randomize) {
+      const threshold = Math.max(0.5, maxGain - 0.75)
+      const pool = candidates.filter((c) => c.gain >= threshold)
+      best = pool[Math.floor(Math.random() * pool.length)].phrase
+    } else {
+      best = candidates.reduce((top, c) => (c.gain > top.gain ? c : top)).phrase
+    }
+
     used.add(best.text)
     const covers = coverage(best, targets)
     steps.push({ phrase: best, covers })

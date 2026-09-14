@@ -52,10 +52,10 @@ def resample(samples: np.ndarray, source: int, target: int) -> np.ndarray:
     return np.interp(positions, np.arange(samples.shape[0]), samples).astype(np.float32)
 
 
-def trim_silence(samples: np.ndarray, floor: float = 0.01, pad: int = 1600) -> np.ndarray:
+def trim_silence(samples: np.ndarray, floor: float = 0.01, pad: int = 1600) -> tuple[np.ndarray, int]:
     """
     Drop leading and trailing near-silence, keeping a tenth of a second either
-    side.
+    side. Returns (trimmed_samples, start_offset_samples).
 
     Silence at the edges is not harmless. Forced alignment has to account for
     every frame it is given, so a long lead-in gets absorbed into the first
@@ -64,11 +64,11 @@ def trim_silence(samples: np.ndarray, floor: float = 0.01, pad: int = 1600) -> n
     """
     loud = np.flatnonzero(np.abs(samples) >= floor)
     if loud.size == 0:
-        return samples
+        return samples, 0
     start = max(0, int(loud[0]) - pad)
     # loud[-1] is the last loud sample, so the slice end is one past it.
     end = min(samples.shape[0], int(loud[-1]) + 1 + pad)
-    return samples[start:end]
+    return samples[start:end], start
 
 
 def measure(samples: np.ndarray) -> dict[str, float]:

@@ -5,6 +5,7 @@ import type { Dictionary } from './dict.ts'
 import { tokenize, type Token } from './tokenize.ts'
 import { syllableCount } from './phonology.ts'
 import { formatIPA, type DisplayOptions } from './display.ts'
+import { applyConnectedSpeech } from './connectedspeech.ts'
 
 export interface AnalyzedToken extends Token {
   pron: Pronunciation | null
@@ -56,6 +57,9 @@ export function analyze(text: string, dict: Dictionary): Analysis {
 
     return { ...token, pron }
   })
+
+  // Apply General American connected speech reductions and allomorphs across words
+  applyConnectedSpeech(tokens)
 
   stats.unique = seen.size
   return { tokens, stats }

@@ -230,7 +230,7 @@ const LONGEST_PHONE = 0.3
 function decodeCTC(logits: Tensorish, tokens: string[], seconds: number): Heard[] {
   const [, frames, size] = logits.dims
   const data = logits.data
-  const emitted: { phone: string; frame: number }[] = []
+  const emitted: { phone: string; startFrame: number; endFrame: number }[] = []
   let previous = -1
   for (let frame = 0; frame < frames; frame++) {
     const row = frame * size
@@ -240,8 +240,12 @@ function decodeCTC(logits: Tensorish, tokens: string[], seconds: number): Heard[
     // confident blank. Say so rather than reporting silence.
     if (!Number.isFinite(data[row + best])) throw new Error('the model produced non-finite logits')
     // The same id on the next frame is one phone held, not a second one.
-    if (best !== previous && best >= FIRST_PHONE_ID) {
-      emitted.push({ phone: tokens[best] ?? '', frame })
+    if (best >= FIRST_PHONE_ID) {
+      if (best === previous && emitted.length > 0) {
+        emitted[emitted.length - 1].endFrame = frame + 1
+      } else {
+        emitted.push({ phone: tokens[best] ?? '', startFrame: frame, endFrame: frame + 1 })
+      }
     }
     previous = best
   }
@@ -249,18 +253,16 @@ function decodeCTC(logits: Tensorish, tokens: string[], seconds: number): Heard[
   const perFrame = frames > 0 ? seconds / frames : 0
   const at = (frame: number) => Math.round(frame * perFrame * 1000) / 1000
 
-  // A phone runs until the next one starts, which keeps the spans contiguous
-  // through connected speech — but a phone followed by a pause would otherwise
-  // swallow the whole pause, and a word cut on that boundary comes back with a
-  // second of silence stuck to it. No English phone runs to a third of a second,
-  // so that is where a span stops growing.
+  // A phone runs until the next one starts if close, but stops growing beyond LONGEST_PHONE.
   const longest = perFrame > 0 ? Math.ceil(LONGEST_PHONE / perFrame) : frames
   return emitted.map((one, i) => {
-    const next = i + 1 < emitted.length ? emitted[i + 1].frame : frames
+    const nextStart = i + 1 < emitted.length ? emitted[i + 1].startFrame : frames
+    const bound = Math.min(nextStart, one.startFrame + longest)
+    const endFrame = Math.min(bound, Math.max(one.endFrame, bound))
     return {
       phone: one.phone,
-      start: at(one.frame),
-      end: at(Math.min(next, one.frame + longest)),
+      start: at(one.startFrame),
+      end: at(endFrame),
     }
   })
 }

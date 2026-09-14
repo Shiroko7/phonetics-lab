@@ -31,6 +31,11 @@ import {
   buildDrill, phraseIndex, phrasesFor, type DrillPhrase, type DrillSet,
 } from '../lib/phrasebank.ts'
 import { PHONES } from '../lib/phones.ts'
+import {
+  loadStruggles, saveStruggles, recordWordReports, removeStruggledWord,
+  togglePinnedWord, addManualWord, syncStrugglesFromAttempts, isStrugglingLot,
+  buildDrillForWord, buildDrillForStruggledWords, type StruggledWord,
+} from '../lib/struggles.ts'
 
 interface Props {
   text: string
@@ -114,7 +119,19 @@ export function Practice({
   const [against, setAgainst] = useState<'previous' | 'best'>('previous')
   /** The drill in progress: a queue of lines, and where in it we are. */
   const [session, setSession] = useState<DrillSet | null>(null)
+  const [sessionSource, setSessionSource] = useState<
+    | { type: 'sounds'; sounds: string[] }
+    | { type: 'word'; word: StruggledWord }
+    | { type: 'trouble' }
+    | null
+  >(null)
   const [stepAt, setStepAt] = useState(0)
+  /** Words the user struggles with across practice sessions. */
+  const [struggles, setStruggles] = useState<StruggledWord[]>(() => loadStruggles())
+  const [troubleFilter, setTroubleFilter] = useState<'all' | 'struggles' | 'pinned'>('all')
+  const [troubleSearch, setTroubleSearch] = useState('')
+  const [newWordInput, setNewWordInput] = useState('')
+  const [newWordError, setNewWordError] = useState<string | null>(null)
   /**
    * Sounds ticked for the next drill. Null until the ticks are touched, so an
    * untouched selection follows the weak list as the weak list changes.
@@ -340,6 +357,35 @@ export function Practice({
     setOpened(worst)
   }, [report])
 
+  const updateStrugglesWithTake = useCallback(
+    (phrase: string, alignedResult: AlignedPhone[], at: number) => {
+      const w = wordsFor(phrase)
+      if (w.length === 0 || alignedResult.length === 0) return
+      const reports = byWord(w, alignedResult)
+      setStruggles((prev) => {
+        const next = recordWordReports(prev, reports, at)
+        saveStruggles(next)
+        return next
+      })
+    },
+    [wordsFor],
+  )
+
+  const syncedHistory = useRef(false)
+  useEffect(() => {
+    if (syncedHistory.current || attempts.length === 0 || !dict) return
+    syncedHistory.current = true
+    setStruggles((prev) => {
+      if (prev.length > 0) return prev
+      const seeded = syncStrugglesFromAttempts([], attempts, dict)
+      if (seeded.length > 0) {
+        saveStruggles(seeded)
+        return seeded
+      }
+      return prev
+    })
+  }, [attempts, dict])
+
   const stopLevelMeter = () => {
     window.clearInterval(levelTimer.current)
     setLevel(0)
@@ -370,6 +416,7 @@ export function Practice({
           try {
             const remote = await analyzeRemote(await decodeToMono16k(blob), expected)
             setAligned(remote.aligned)
+            updateStrugglesWithTake(phrase, remote.aligned, at)
             onAttempt(
               {
                 target: phrase,
@@ -391,12 +438,13 @@ export function Practice({
 
       const result = alignPhones(expected, heard)
       setAligned(result)
+      updateStrugglesWithTake(phrase, result, at)
       onAttempt(
         { target: phrase, aligned: result, score: scoreAlignment(result), at, scorer: 'browser' },
         editing ?? undefined,
       )
     },
-    [heard, wordsFor, onAttempt, editing, attempts, backend, playback],
+    [heard, wordsFor, onAttempt, editing, attempts, backend, playback, updateStrugglesWithTake],
   )
 
   /**
@@ -519,6 +567,7 @@ export function Practice({
 
         const at = Date.now()
         setAligned(remote.aligned)
+        updateStrugglesWithTake(phrase, remote.aligned, at)
         setPhase('done')
         setPlayback({ url: taken.url, durationMs: taken.durationMs, blob: taken.blob })
         setEditing(attempts.length)
@@ -578,6 +627,7 @@ export function Practice({
       const at = Date.now()
       const result = alignPhones(flatten(wordsFor(phrase)), said)
       setAligned(result)
+      updateStrugglesWithTake(phrase, result, at)
       setPhase('done')
 
       // Only now is the previous take replaced — and the old one is not lost
@@ -595,7 +645,7 @@ export function Practice({
       setError(`Analysis failed: ${(err as Error).message}`)
       setPhase('idle')
     }
-  }, [mode, target, wordsFor, onAttempt, attempts.length, backend])
+  }, [mode, target, wordsFor, onAttempt, attempts.length, backend, updateStrugglesWithTake])
 
   useEffect(() => () => {
     stopLevelMeter()
@@ -740,9 +790,10 @@ export function Practice({
   const startDrill = useCallback(
     (wanted: string[]) => {
       if (wanted.length === 0) return
-      const built = buildDrill(phrases, wanted)
+      const built = buildDrill(phrases, wanted, 8, { randomize: true })
       if (built.steps.length === 0) return
       setSession(built)
+      setSessionSource({ type: 'sounds', sounds: wanted })
       // The ticks follow what is actually being drilled, however it was asked for.
       setPicked(wanted)
       stepTo(0, built)
@@ -755,10 +806,98 @@ export function Practice({
     [phrases, stepTo],
   )
 
+  /** Build a targeted drill around a specific trouble word. */
+  const drillWord = useCallback(
+    (entry: StruggledWord) => {
+      const built = buildDrillForWord(entry, phrases, dict, { randomize: true })
+      if (built.steps.length === 0) return
+      setSession(built)
+      setSessionSource({ type: 'word', word: entry })
+      stepTo(0, built)
+      requestAnimationFrame(() =>
+        drillPanel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      )
+    },
+    [phrases, dict, stepTo],
+  )
+
+  /** Build a drill spanning trouble words. */
+  const drillAllTrouble = useCallback(() => {
+    const targets = struggles.filter(isStrugglingLot)
+    const list = targets.length > 0 ? targets : struggles
+    if (list.length === 0) return
+    const built = buildDrillForStruggledWords(list, phrases, dict, { randomize: true })
+    if (built.steps.length === 0) return
+    setSession(built)
+    setSessionSource({ type: 'trouble' })
+    stepTo(0, built)
+    requestAnimationFrame(() =>
+      drillPanel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    )
+  }, [struggles, phrases, dict, stepTo])
+
+  /** Re-roll the drill with completely new randomized phrases. */
+  const shuffleCurrentDrill = useCallback(() => {
+    if (sessionSource?.type === 'word') {
+      drillWord(sessionSource.word)
+    } else if (sessionSource?.type === 'trouble') {
+      drillAllTrouble()
+    } else if (sessionSource?.type === 'sounds') {
+      startDrill(sessionSource.sounds)
+    } else if (session) {
+      const fallbackSounds = session.steps.flatMap((s) => s.covers.map((c) => c.phone))
+      if (fallbackSounds.length > 0) startDrill([...new Set(fallbackSounds)])
+    }
+  }, [sessionSource, session, drillWord, drillAllTrouble, startDrill])
+
   const endDrill = useCallback(() => {
     setSession(null)
+    setSessionSource(null)
     setStepAt(0)
   }, [])
+
+  const handleAddWord = useCallback(
+    (e?: React.FormEvent) => {
+      e?.preventDefault()
+      const query = newWordInput.trim()
+      if (!query) return
+      const next = addManualWord(struggles, query, dict)
+      if (!next) {
+        setNewWordError(`“${query}” was not found in the pronunciation dictionary.`)
+        return
+      }
+      setStruggles(next)
+      setNewWordInput('')
+      setNewWordError(null)
+    },
+    [newWordInput, struggles, dict],
+  )
+
+  const removeWord = useCallback((wordKey: string) => {
+    setStruggles((prev) => removeStruggledWord(prev, wordKey))
+  }, [])
+
+  const togglePin = useCallback((wordKey: string) => {
+    setStruggles((prev) => togglePinnedWord(prev, wordKey))
+  }, [])
+
+  const clearTroubles = useCallback(() => {
+    if (struggles.length === 0) return
+    if (!window.confirm(`Clear all ${struggles.length} words from your Trouble Words Bank?`)) return
+    setStruggles([])
+    saveStruggles([])
+  }, [struggles.length])
+
+  const visibleStruggles = useMemo(() => {
+    let list = struggles
+    if (troubleFilter === 'struggles') list = list.filter(isStrugglingLot)
+    else if (troubleFilter === 'pinned') list = list.filter((e) => e.pinned)
+    if (troubleSearch.trim()) {
+      const q = troubleSearch.toLowerCase().trim()
+      list = list.filter((e) => e.word.includes(q) || e.ipa.includes(q))
+    }
+    return list
+  }, [struggles, troubleFilter, troubleSearch])
 
   /** A sound picked out on the vowel chart arrives here as a drill to open. */
   useEffect(() => {
@@ -824,15 +963,44 @@ export function Practice({
       {session && (
         <div className="panel drill-session" ref={drillPanel}>
           <h3 className="panel-title">
-            Drill
+            {sessionSource?.type === 'word'
+              ? `Drill · ${sessionSource.word.display}`
+              : sessionSource?.type === 'trouble'
+                ? 'Drill · Trouble Words'
+                : 'Drill'}
+            <button
+              className="ghost tiny"
+              onClick={shuffleCurrentDrill}
+              style={{ marginRight: 6 }}
+              title="Get a completely new randomized set of drill lines"
+            >
+              ↻ new lines
+            </button>
             <button className="ghost tiny" onClick={endDrill}>end drill</button>
           </h3>
           <p className="desc" style={{ marginBottom: 12 }}>
-            {session.steps.length} short line{session.steps.length === 1 ? '' : 's'} chosen to
-            work {sessionSounds.map((phone) => `/${phone}/`).join(' ')} into ordinary speech —
-            a sound said on its own always comes out better than it does in a sentence.
-            {session.missing.length > 0 && (
-              <> Nothing in the bank drills {session.missing.map((p) => `/${p}/`).join(' ')}.</>
+            {sessionSource?.type === 'word' ? (
+              <>
+                Targeted drill built around <b>{sessionSource.word.display}</b> (/{formatIPA(sessionSource.word.ipa, display)}/)
+                {sessionSounds.length > 0 && (
+                  <> and its difficult sound{sessionSounds.length === 1 ? '' : 's'} {sessionSounds.map((p) => `/${p}/`).join(' ')}</>
+                )} — practising the word, its context in speech, and its key sounds.
+              </>
+            ) : sessionSource?.type === 'trouble' ? (
+              <>
+                Targeted drill built from your trouble words and their weak sounds
+                {sessionSounds.length > 0 && <> ({sessionSounds.map((p) => `/${p}/`).join(' ')})</>} —
+                saying them in running speech until the tongue learns the pattern.
+              </>
+            ) : (
+              <>
+                {session.steps.length} short line{session.steps.length === 1 ? '' : 's'} chosen to
+                work {sessionSounds.map((phone) => `/${phone}/`).join(' ')} into ordinary speech —
+                a sound said on its own always comes out better than it does in a sentence.
+                {session.missing.length > 0 && (
+                  <> Nothing in the bank drills {session.missing.map((p) => `/${p}/`).join(' ')}.</>
+                )}
+              </>
             )}
           </p>
 
@@ -1333,6 +1501,185 @@ export function Practice({
         </div>
       )}
 
+      <div className="panel trouble-bank">
+        <div className="trouble-toolbar">
+          <div>
+            <h3 className="panel-title" style={{ margin: 0 }}>
+              Trouble Words Bank
+              <span className="count-badge">{struggles.length}</span>
+            </h3>
+            <p className="desc" style={{ margin: '4px 0 0' }}>
+              Words that give you trouble across takes. Stored here for reference so you can review them and generate targeted drills around them.
+            </p>
+          </div>
+          <div className="trouble-header-actions">
+            {struggles.length > 0 && (
+              <>
+                <button
+                  className="primary"
+                  onClick={drillAllTrouble}
+                  title="Generate a custom drill session covering your trouble words"
+                >
+                  ⚡ Drill trouble words
+                </button>
+                <button className="ghost tiny" onClick={clearTroubles} title="Clear all words from trouble bank">
+                  reset bank
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+
+        <form className="trouble-add-form" onSubmit={handleAddWord}>
+          <input
+            type="text"
+            className="trouble-add-input"
+            value={newWordInput}
+            onChange={(e) => { setNewWordInput(e.target.value); setNewWordError(null) }}
+            placeholder="Add word to bank (e.g. squirrel)"
+          />
+          <button type="submit" disabled={!newWordInput.trim()}>
+            + Add word
+          </button>
+          {newWordError && <span className="desc" style={{ color: '#dc2626', marginLeft: 8 }}>{newWordError}</span>}
+        </form>
+
+        {struggles.length > 0 && (
+          <div className="trouble-toolbar" style={{ borderBottom: 'none', marginBottom: 8, paddingBottom: 0 }}>
+            <div className="trouble-filters">
+              <span className="desc" style={{ marginRight: 4 }}>Filter:</span>
+              <button
+                className={troubleFilter === 'all' ? 'on' : ''}
+                onClick={() => setTroubleFilter('all')}
+              >
+                All ({struggles.length})
+              </button>
+              <button
+                className={troubleFilter === 'struggles' ? 'on' : ''}
+                onClick={() => setTroubleFilter('struggles')}
+              >
+                Needs practice ({struggles.filter(isStrugglingLot).length})
+              </button>
+              <button
+                className={troubleFilter === 'pinned' ? 'on' : ''}
+                onClick={() => setTroubleFilter('pinned')}
+              >
+                Pinned ({struggles.filter((e) => e.pinned).length})
+              </button>
+            </div>
+            {struggles.length > 4 && (
+              <input
+                type="search"
+                className="trouble-search"
+                value={troubleSearch}
+                onChange={(e) => setTroubleSearch(e.target.value)}
+                placeholder="Search words…"
+              />
+            )}
+          </div>
+        )}
+
+        {visibleStruggles.length > 0 ? (
+          <div className="trouble-grid">
+            {visibleStruggles.map((entry) => {
+              const lot = isStrugglingLot(entry)
+              return (
+                <div
+                  key={entry.word}
+                  className={`trouble-card${lot ? ' struggles-lot' : ''}`}
+                >
+                  <div className="trouble-card-top">
+                    <span className="word">{entry.display}</span>
+                    <span className="ipa">/{formatIPA(entry.ipa, display)}/</span>
+                    <span className="spacer" />
+                    <button
+                      className={`pin-btn${entry.pinned ? ' on' : ''}`}
+                      onClick={() => togglePin(entry.word)}
+                      title={entry.pinned ? 'Unpin word' : 'Pin word to keep at top'}
+                      aria-label={entry.pinned ? 'Unpin word' : 'Pin word'}
+                    >
+                      {entry.pinned ? '★' : '☆'}
+                    </button>
+                    <button
+                      className="remove-btn"
+                      onClick={() => removeWord(entry.word)}
+                      title="Remove from bank / mark mastered"
+                      aria-label={`Remove ${entry.display}`}
+                    >
+                      ×
+                    </button>
+                  </div>
+
+                  <div className="trouble-stats">
+                    <span className="count-tag">
+                      {entry.struggleCount} struggle{entry.struggleCount === 1 ? '' : 's'} in {entry.totalAttempts} try{entry.totalAttempts === 1 ? '' : 'ies'}
+                    </span>
+                    {lot && <span className="lot-tag">Needs practice</span>}
+                    {entry.lastScore > 0 && (
+                      <span className={`score-tag ${band(entry.lastScore)}`}>
+                        last: {entry.lastScore}
+                      </span>
+                    )}
+                  </div>
+
+                  {entry.weakPhones.length > 0 && (
+                    <div className="trouble-weak">
+                      <span>Problem sounds:</span>
+                      {entry.weakPhones.map((p) => (
+                        <span key={p.phone} className="sound-tag">
+                          /{p.phone}/ {p.count > 1 ? `×${p.count}` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {entry.recentSaid.length > 0 && (
+                    <div className="trouble-said">
+                      Recent take heard as: <i>/{entry.recentSaid[0]}/</i>
+                    </div>
+                  )}
+
+                  <div className="trouble-actions">
+                    <button
+                      className="ghost tiny"
+                      onClick={() => speak(entry.display)}
+                      title="Hear correct pronunciation"
+                    >
+                      ♪ listen
+                    </button>
+                    <button
+                      className="ghost tiny"
+                      onClick={() => setLine(entry.display)}
+                      title="Load this word into the practice box"
+                    >
+                      say this
+                    </button>
+                    <button
+                      className="tiny accent"
+                      onClick={() => drillWord(entry)}
+                      title="Generate a targeted practice session around this word"
+                    >
+                      generate drills →
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        ) : (
+          <div className="trouble-empty">
+            {struggles.length === 0 ? (
+              <>
+                No trouble words recorded yet. As you practise, any words you struggle with repeatedly
+                will be automatically banked here so you can generate targeted drills around them.
+              </>
+            ) : (
+              <>No words match the current filter.</>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="panel">
         <h3 className="panel-title">{attempts.length > 0 ? 'Your weak sounds' : 'Drills'}</h3>
         <p className="desc" style={{ marginBottom: 12 }}>
@@ -1423,8 +1770,8 @@ export function Practice({
           <div className="weak-list">
             {weak.map((stat) => {
               const swap = dominant(stat.confusions)
-              const suggestions = drills ? findDrills(drills, stat.phone, swap?.[0], 4) : []
-              const lines = phrasesFor(phrases, stat.phone, swap?.[0], 2)
+              const suggestions = drills ? findDrills(drills, stat.phone, swap?.[0], 4, { randomize: true }) : []
+              const lines = phrasesFor(phrases, stat.phone, swap?.[0], 2, { randomize: true })
               return (
                 <div key={stat.phone} className="weak-card">
                   <div className="weak-head">

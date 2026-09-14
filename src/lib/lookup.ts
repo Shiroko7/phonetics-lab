@@ -22,6 +22,10 @@ export interface Pronunciation {
   source: Source
   /** How a derived or spelled form was reached, for the tooltip. */
   note?: string
+  /** Connected-speech guidance, e.g. /ði/ before vowels or weak-form reduction. */
+  connectedNote?: string
+  /** Explanation of spelling vs sound in connected speech. */
+  spellingNote?: string
 }
 
 /** Letter names, for initialisms that are read out one letter at a time. */

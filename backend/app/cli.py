@@ -114,9 +114,9 @@ def check_suite() -> int:
 
     print("\naudio")
     quiet = np.concatenate([np.zeros(8000), np.ones(1600) * 0.5, np.zeros(8000)]).astype(np.float32)
-    trimmed = audio.trim_silence(quiet)
+    trimmed, _ = audio.trim_silence(quiet)
     check("silence is trimmed back to a tenth of a second either side", len(trimmed), 4800)
-    check("a fully silent take survives trimming", len(audio.trim_silence(np.zeros(100, np.float32))), 100)
+    check("a fully silent take survives trimming", len(audio.trim_silence(np.zeros(100, np.float32))[0]), 100)
 
     print()
     if _failures:

@@ -9,13 +9,14 @@
 import { readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { analyze } from '../src/lib/analyze.ts'
 import { lookupWord } from '../src/lib/lookup.ts'
 import { applyFlapping, respell, transcribe } from '../src/lib/phonology.ts'
 import { tokenize } from '../src/lib/tokenize.ts'
 import { alignPhones, expectedPhones, normalizeRecognized, scoreAlignment } from '../src/lib/align.ts'
 import { phoneDistance } from '../src/lib/phonefeatures.ts'
 import {
-  byWord, comparePhones, compareWords, dominant, flatten, focusScore, targetWords,
+  byWord, comparePhones, compareWords, dominant, extractVariantMap, flatten, focusScore, targetWords,
 } from '../src/lib/report.ts'
 import {
   isCurrent, lineProgress, mixedScorers, SCORER_REVISION, scorerOf,
@@ -28,6 +29,10 @@ import { PHRASE_BANK } from '../src/data/phrases.ts'
 import { PHONES } from '../src/lib/phones.ts'
 import { CHART, DIPHTHONGS, place, VOWELS } from '../src/data/vowels.ts'
 import { examplesFor, spellingGuide } from '../src/lib/vowelref.ts'
+import {
+  recordWordReports, isStruggleReport, isStrugglingLot, addManualWord,
+  removeStruggledWord, togglePinnedWord, buildDrillForWord, buildDrillForStruggledWords,
+} from '../src/lib/struggles.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -94,6 +99,35 @@ group('lookup cascade', () => {
   check('numeral', ipa('3rd'), 'θɝd')
   check('initialism reads as letters', src('API'), 'dictionary')
   check('unknown word is flagged', src('Zylphrax'), 'guessed')
+})
+
+group('connected speech and contextual reductions', () => {
+  const trans = (phrase) => analyze(phrase, dict).tokens.filter((t) => t.isWord && t.pron).map((t) => t.pron.ipa).join(' ')
+  check('the before vowel becomes ði', trans('the apple'), 'ði ˈæp.əl')
+  check('the before consonant stays ðə', trans('the book'), 'ðə bʊk')
+  check('the before silent h vowel onset', trans('the hour'), 'ði ˈaʊ.ɚ')
+  check('the before vowel letter with consonant onset', trans('the university'), 'ðə ˌju.nəˈvɝ.sə.ti')
+  check('was in running speech reduces to wəz', trans('it was good'), 'ɪt wəz ɡʊd')
+  check('was at sentence end retains wɑz', trans('yes it was.'), 'jɛs ɪt wɑz')
+  check('as in running speech reduces to əz', trans('as big as that'), 'əz bɪɡ əz ðæt')
+  check('an reduces to ən', trans('an apple'), 'ən ˈæp.əl')
+  check('can in running speech reduces to kən', trans('I can go'), 'aɪ kən ɡoʊ')
+  check('to before vowel becomes tu', trans('to eat'), 'tu it')
+  check('to before consonant reduces to tə', trans('to go'), 'tə ɡoʊ')
+
+  // Alignment accepts both citation and weak form without error
+  const words = targetWords('he was happy', dict)
+  const want = flatten(words)
+  const variantMap = extractVariantMap(words)
+  // user says weak form: hi wəz hæpi
+  const saidWeak = normalizeRecognized('hi wəz hæpi')
+  const scoredWeak = alignPhones(want, saidWeak, variantMap)
+  check('weak form /wəz/ scores 100', scoreAlignment(scoredWeak).overall, 100)
+
+  // user says strong citation form: hi wɑz hæpi
+  const saidStrong = normalizeRecognized('hi wɑz hæpi')
+  const scoredStrong = alignPhones(want, saidStrong, variantMap)
+  check('strong form /wɑz/ scores 100', scoreAlignment(scoredStrong).overall, 100)
 })
 
 group('respelling', () => {
@@ -495,6 +529,70 @@ group('a take survives the trip to the scoring service', async () => {
   check('the data chunk sizes the samples', view.getUint32(40, true), samples.length * 4)
   check('and the file is header plus data', bytes.length, 44 + samples.length * 4)
   check('with the samples intact', new Float32Array(bytes.buffer, 44)[7], samples[7])
+})
+
+group('phrase library is large and randomized across sessions', () => {
+  const bank = indexPhrases(dict, PHRASE_BANK)
+  check('library has a large bank of phrases', bank.length >= 200, true)
+
+  const drillable = Object.keys(PHONES).filter((p) => p !== 'ɾ' && p !== 'ʔ')
+  const undercovered = drillable.filter((p) => bank.filter((one) => one.focus.includes(p)).length < 5)
+  check('every drillable sound has at least 5 lines of its own', undercovered.join(' '), '')
+
+  // Multiple randomized drill generations yield varied phrases across sessions
+  const sets = new Set()
+  for (let i = 0; i < 10; i++) {
+    const drill = buildDrill(bank, ['θ', 's', 'i'], 6, { randomize: true })
+    sets.add(drill.steps.map((s) => s.phrase.text).join('|'))
+  }
+  check('randomized drill generation produces different sessions', sets.size > 1, true)
+})
+
+group('trouble words bank tracks struggles, persistence and targeted drills', () => {
+  const bankPhrases = indexPhrases(dict, PHRASE_BANK)
+
+  // Take with a struggling word: "think" pronounced as "sink"
+  const words = targetWords('I think this is good', dict)
+  const heard = normalizeRecognized('aɪ sɪŋk ðɪs ɪz ɡʊd')
+  const report = byWord(words, alignPhones(flatten(words), heard))
+
+  const thinkWord = report.find((w) => w.text.toLowerCase() === 'think')
+  check('faulty word is flagged as a struggle', isStruggleReport(thinkWord), true)
+
+  // Record into struggle bank
+  let bank = recordWordReports([], report, 1000)
+  check('word is stored in bank', bank.some((w) => w.word === 'think'), true)
+  const storedThink = bank.find((w) => w.word === 'think')
+  check('initial struggle count is 1', storedThink.struggleCount, 1)
+  check('weak phone /θ/ recorded', storedThink.weakPhones.some((p) => p.phone === 'θ'), true)
+  check('initial status is not struggling a lot', isStrugglingLot(storedThink), false)
+
+  // Second struggle with "think"
+  bank = recordWordReports(bank, report, 2000)
+  const twiceStruggled = bank.find((w) => w.word === 'think')
+  check('struggle count incremented', twiceStruggled.struggleCount, 2)
+  check('now qualifies as struggling a lot', isStrugglingLot(twiceStruggled), true)
+
+  // Manual word addition, pin and remove
+  const withManual = addManualWord(bank, 'squirrel', dict)
+  check('manual word added', withManual.some((w) => w.word === 'squirrel'), true)
+  check('manual word is pinned', withManual.find((w) => w.word === 'squirrel').pinned, true)
+
+  const unpinned = togglePinnedWord(withManual, 'squirrel')
+  check('word unpinned', unpinned.find((w) => w.word === 'squirrel').pinned, false)
+
+  const withoutWord = removeStruggledWord(unpinned, 'squirrel')
+  check('word removed', withoutWord.some((w) => w.word === 'squirrel'), false)
+
+  // Generate targeted drill around the struggled word
+  const wordDrill = buildDrillForWord(twiceStruggled, bankPhrases, dict, { randomize: true })
+  check('drill for word has steps', wordDrill.steps.length >= 3, true)
+  check('first step is the target word', wordDrill.steps[0].phrase.text, 'think')
+  check('drills the weak phone /θ/', wordDrill.steps.some((s) => s.covers.some((c) => c.phone === 'θ')), true)
+
+  // Multi-word drill
+  const multiDrill = buildDrillForStruggledWords([twiceStruggled], bankPhrases, dict, { randomize: true })
+  check('multi-word drill has steps', multiDrill.steps.length >= 3, true)
 })
 
 console.log(failures === 0 ? '\nall checks passed' : `\n${failures} check(s) failed`)
