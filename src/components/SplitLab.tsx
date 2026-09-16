@@ -15,10 +15,11 @@ import { PhoneticLookup } from './shared/PhoneticLookup.tsx'
 import { SettingsDrawer } from './shared/SettingsDrawer.tsx'
 import { Vowels } from './Vowels.tsx'
 import { formatIPA } from '../lib/display.ts'
+import { DailyPractice } from './DailyPractice.tsx'
 
 interface Props {
-  view: 'practice' | 'lookup' | 'vowels'
-  setView: (v: 'practice' | 'lookup' | 'vowels') => void
+  view: 'practice' | 'daily' | 'lookup' | 'vowels'
+  setView: (v: 'practice' | 'daily' | 'lookup' | 'vowels') => void
   practice: PracticeState
   // Lookup props
   text: string
@@ -93,7 +94,7 @@ export function SplitLab({
     weak,
     attempts,
     score,
-    setLine,
+    practiseWord,
   } = practice
 
   return (
@@ -114,6 +115,12 @@ export function SplitLab({
             onClick={() => setView('practice')}
           >
             Practice Studio
+          </button>
+          <button
+            className={`split-tab-btn ${view === 'daily' ? 'active' : ''}`}
+            onClick={() => setView('daily')}
+          >
+            Daily Practice
           </button>
           <button
             className={`split-tab-btn ${view === 'lookup' ? 'active' : ''}`}
@@ -246,8 +253,8 @@ export function SplitLab({
                         <button
                           key={entry.word}
                           className="trouble-quick-chip"
-                          onClick={() => setLine(entry.display)}
-                          title={`Load "${entry.display}" into practice`}
+                          onClick={() => practiseWord(entry)}
+                          title={`Load a contextual phrase for "${entry.display}"`}
                         >
                           {entry.display}
                         </button>
@@ -337,6 +344,10 @@ export function SplitLab({
               </div>
             </section>
           </div>
+        )}
+
+        {view === 'daily' && (
+          <DailyPractice practice={practice} dict={dict} />
         )}
 
         {view === 'lookup' && (

@@ -7,8 +7,9 @@ Then record yourself and have every sound checked against it, and drill the ones
 going wrong. **Vowels** is the reference behind all of it: the vowel chart, clickable, with
 what each vowel is and every way English writes it.
 
-Everything runs in the browser. The dictionary is bundled, so there is no API key,
-no rate limit, and no network round-trip per word.
+The dictionary and browser scoring run locally. Optional GPU scoring uses the local
+service. Free online reference voices need an internet connection but no API key,
+subscription, or payment account.
 
 ## Running it
 
@@ -17,8 +18,8 @@ make install
 make dev
 ```
 
-That starts two things: the web app on :5173, and a local scoring service on :8000 that
-grades recordings by forced alignment on the GPU. `make web` runs the app alone — it is
+That starts two things: the web app on :5173, and a local service on :8000 that
+grades recordings on the GPU and connects to the free reference-voice service. `make web` runs the app alone — it is
 complete without the service and falls back to the in-browser recogniser, just less
 precisely. `make help` lists the rest.
 
@@ -98,25 +99,45 @@ are applied on the fly.
 
 ## Audio
 
-Clicking a word speaks it through the browser's speech synthesiser. This is the primary
-path because it is instant, works offline and can say anything — invented words and
-surnames included. Measured click-to-speech is well under a millisecond, with no network
-call on the click path.
+**Brian is the default Studio reference voice.** Daily rotates allowed speakers automatically.
+Settings → Speech Audio shows your current speaker, with a searchable **Change voice**
+library instead of a long dropdown. Both voice libraries show at most five rows at a time.
+Available sources include:
 
-Pick a voice in the sidebar. The list is split by what actually determines responsiveness:
+- **Free online · natural voices:** Microsoft Edge voices discovered through the local
+  service using the community [edge-tts](https://github.com/rany2/edge-tts) connector.
+  Available choices currently include Brian, Andrew, Ava, Emma, Aria, Jenny, and others.
+  No Microsoft account, API key, subscription, or payment setup is used.
+- **Browser · natural voices:** natural voices exposed directly by your browser.
+- **Other browser voices:** alternatives, including locally installed offline voices.
 
-- **Installed — instant.** Local SAPI voices. They start speaking immediately.
-- **Online — slower, needs network.** Windows "Online (Natural)" voices. They sound
-  better but synthesise in Microsoft's cloud, so every word costs a round-trip. That is
-  very noticeable when clicking word by word, and the first press is slowest of all.
+Run `npm run dev` (or `make dev`) for free online voices. The catalogue is fetched on
+startup and can be refreshed from voice settings. Daily starts with natural US English
+voices to match the dictionary; **Manage voices** can enable other English accents.
+Speakers are shuffled across cards without adjacent repeats when two or more are allowed.
+On any card, **Another voice** changes the current speaker without advancing the exercise;
+**Don’t use this voice** excludes that speaker and replaces pending assignments immediately.
+Exclusions persist in this browser, apply in Studio too, and include duplicate browser/online
+variants of the same speaker. The library has **Allowed** and **Excluded** views, previews,
+search, and individual **Restore** actions—even for voices currently unavailable.
+Changing a voice does not change the sentence, scores, first answers, or recorded speaker
+history. An unanswered listening trial must hear the new reference before answering.
+If every candidate is excluded, listening pauses until a voice is restored; there is no
+silent fallback to an excluded speaker. Recording and skipping remain available.
 
-Local voices sort first and are chosen by default. If the machine has no offline English
-voice installed — which is common, and was the case on the machine this was built on —
-the panel says so and gives the Windows path to install one. Voices also carry a ♂/♀ hint
-guessed from the name, and the choice is remembered in `localStorage`. ▶ previews it.
+Online playback sends only the text you ask to hear to Microsoft's Edge speech service.
+Your microphone recordings are not sent to that service. Generated audio is cached in
+memory by text, voice, and speed, with a 16 MB / 64-entry limit; it is not written to disk.
+Playback can be cancelled while downloading, and failed playback never counts as a
+completed listening trial. The connector is unofficial and depends on service availability;
+browser voices remain selectable when it is unavailable. This is not a paid Azure integration.
 
-The engine is primed with a silent utterance on first interaction so the first word
-clicked does not pay engine start-up cost.
+The local voice endpoints are `GET /tts/voices` and `POST /tts/speak` on :8000.
+`uv run --directory backend python -m unittest test_voice -v` checks catalogue failures,
+request limits, and caching without making network requests. With both app services running,
+`node scripts/check-daily-browser.mjs --live-voices` verifies discovery, Brian's default,
+another speaker's preview, and the Daily flow using actual free reference audio. Its
+microphone and pronunciation scores remain simulated.
 
 Human recordings from [dictionaryapi.dev](https://dictionaryapi.dev) are available behind
 the **Use human recordings** toggle, off by default. When on, a recording is fetched in
@@ -128,6 +149,65 @@ That API was unreachable during development, which is exactly why nothing awaits
 
 Switch to **Practise** in the header to record yourself and get phone-level feedback.
 There are two modes, and both give identical analysis.
+
+### Daily Practice
+
+**Daily Practice** is an ongoing spaced-practice deck built from repeated weak sounds and
+trouble words. Choose 2, 4, or 6 targets per session, with up to two new targets each day.
+The randomized session plan is saved, so pausing or reloading preserves the exercises and results.
+
+1. **Recall after a break:** returning targets begin with a previously practised sentence,
+   before reference playback. This checks delayed recall separately from immediate practice.
+2. **Hear the difference:** two sentence-identification trials per supported target, with
+   different reference voices and dictionary-checked sound contrasts. Answers unlock only after
+   successful playback. The first answer is saved, then both sentences can be replayed for feedback.
+3. **Practise in context:** two different sentences, reference audio, recording, and the same
+   word-by-word diagnostics as Practice Studio. Trouble-word sentences must contain that word.
+4. **Try an unfamiliar sentence:** a separate sentence reserve excludes previously displayed
+   Daily text and saved Studio attempts. The reference stays locked until the first scored take.
+   Later takes are saved as extra practice and cannot replace the first transfer result.
+
+Reference stays on the left and recording on the right. **Record again** remains available
+regardless of score, and **Next card / Skip this card** lets the learner control repetitions.
+Skips and playback failures do not become incorrect answers. A scored line of **90/100 or higher**
+is ready to move on, even when individual sounds or words are flagged. Those highlights still
+guide practice and keep the review interval conservative. Lower scores can also be continued;
+the thresholds are app heuristics, not validated percentages of intelligibility.
+
+Independent first takes guide the automatic **Again / Hard / Good / Easy** interval; listening
+errors can shorten it, but listening success cannot establish speech production. Without an
+independent check, rehearsal receives a conservative interval. A target's schedule advances at
+most once per calendar day, so repeated takes cannot inflate it.
+
+Daily history separates listening accuracy, rehearsed speech, unfamiliar sentences, delayed recall,
+extra takes, and reference voices heard. Detailed events include timestamps, sentences, first-take
+status, voice identity, and scorer/revision. Different scoring systems are not averaged together.
+Earlier Daily reviews remain available without inventing listening or transfer results for them.
+
+Targets are used meaningfully in full sentences, never inserted into quoted-word templates.
+Listening pairs use checked frames where both alternatives are grammatical and plausible.
+Trouble words retain their original practice sentences; Daily can reuse those, Studio passages,
+and saved attempts for rehearsal, never as unseen transfer material. When a target lacks a
+real context, the app reports the gap and asks for a sentence in Studio. Pending legacy
+carrier exercises are refreshed without rewriting recorded prompts, answers, or scores.
+History is local to this browser and is removed if site data is cleared.
+
+Daily uses the allowed voice pool, replacing the earlier Brian-only/checkbox selection.
+Other English accents can be enabled. These are **synthetic references**, not recordings of human
+participants. With fewer than two voices, the app explains the missing voice variability. When a
+target lacks a checked contrast or its unfamiliar-sentence reserve is exhausted, the session
+reports that limitation rather than creating an unsupported measurement.
+
+The design draws on the [HVPT perception synthesis](https://www.cambridge.org/core/journals/studies-in-second-language-acquisition/article/high-variability-phonetic-training-hvpt-a-metaanalysis-of-l2-perceptual-training-studies/6ABB8C1F32D88D53EA8D05A4565E76F6)
+and [production/generalization synthesis](https://www.cambridge.org/core/journals/applied-psycholinguistics/article/does-perceptual-high-variability-phonetic-training-improve-l2-speech-production-a-metaanalysis-of-perceptionproduction-connection/E38D8F5CE65DC708137B0E95F97C6BC7).
+Exercise counts, scheduling, and thresholds are product choices, not a replication of a validated
+training protocol. Transfer here means reading new text, not spontaneous conversation.
+
+Verification: `npm run check` covers content, first-response preservation, transfer isolation,
+voice selection, persistence, and scheduling. With the dev server running,
+`node scripts/check-daily-browser.mjs` exercises the UI in an isolated headless Chrome profile
+using simulated voices, microphone input, and scoring responses. Set `CHROME_PATH` and
+`DAILY_TEST_URL` if the defaults do not match your machine. This test does not measure audio quality.
 
 **Read a script** — you choose the words first.
 

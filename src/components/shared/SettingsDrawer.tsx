@@ -1,5 +1,9 @@
+import { useState } from 'react'
 import type { DisplayOptions } from '../../lib/display.ts'
-import type { Voice } from '../../lib/speech.ts'
+import { synthesise, type Voice } from '../../lib/speech.ts'
+import { voiceLabel } from '../../lib/voicePreferences.ts'
+import { useVoicePreferences } from '../../lib/useVoicePreferences.ts'
+import { VoiceLibrary } from './VoiceLibrary.tsx'
 
 interface Props {
   open: boolean
@@ -16,28 +20,6 @@ interface Props {
   onPreviewVoice: () => void
 }
 
-const REGIONS: Record<string, string> = {
-  'en-US': 'US',
-  'en-GB': 'UK',
-  'en-AU': 'AU',
-  'en-CA': 'CA',
-  'en-IE': 'IE',
-  'en-IN': 'IN',
-  'en-NZ': 'NZ',
-  'en-ZA': 'ZA',
-}
-
-function cleanVoiceLabel(voice: Voice): string {
-  const name = voice.name
-    .replace(/^Microsoft /, '')
-    .replace(/^Google /, '')
-    .replace(/ - .*$/, '')
-    .replace(/\s*Online\s*/, ' ')
-    .replace(/\s*\(Natural\)\s*/, ' ')
-    .trim()
-  return `${name} (${REGIONS[voice.lang] ?? voice.lang})`
-}
-
 export function SettingsDrawer({
   open,
   onClose,
@@ -50,15 +32,17 @@ export function SettingsDrawer({
   voices,
   voiceURI,
   onVoice,
-  onPreviewVoice,
+  onPreviewVoice: _onPreviewVoice,
 }: Props) {
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [showVoices, setShowVoices] = useState(false)
+  const [voicePreferences, updateVoicePreferences] = useVoicePreferences()
   if (!open) return null
 
   const set = <K extends keyof DisplayOptions>(key: K, value: DisplayOptions[K]) =>
     onDisplay({ ...display, [key]: value })
 
-  const localVoices = voices.filter((v) => v.local)
-  const cloudVoices = voices.filter((v) => !v.local)
+  const currentVoice = voices.find((voice) => voice.uri === voiceURI)
 
   return (
     <div className="settings-drawer-backdrop" onClick={onClose}>
@@ -117,44 +101,17 @@ export function SettingsDrawer({
           <section className="settings-section">
             <h4 className="section-title">Speech Audio</h4>
             <div className="settings-options-list">
-              {voices.length > 0 && (
-                <div className="voice-selector-box">
-                  <label className="control-label">Voice</label>
-                  <div className="voice-input-row">
-                    <select
-                      value={voiceURI}
-                      onChange={(e) => onVoice(e.target.value)}
-                      className="voice-select"
-                    >
-                      {localVoices.length > 0 && (
-                        <optgroup label="Installed (Instant)">
-                          {localVoices.map((v) => (
-                            <option key={v.uri} value={v.uri}>
-                              {cleanVoiceLabel(v)}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                      {cloudVoices.length > 0 && (
-                        <optgroup label="Online">
-                          {cloudVoices.map((v) => (
-                            <option key={v.uri} value={v.uri}>
-                              {cleanVoiceLabel(v)}
-                            </option>
-                          ))}
-                        </optgroup>
-                      )}
-                    </select>
-                    <button
-                      className="ghost small"
-                      onClick={onPreviewVoice}
-                      title="Preview this voice"
-                    >
-                      ▶
-                    </button>
-                  </div>
-                </div>
-              )}
+              <div className="studio-voice-summary">
+                <div><span className="voice-caption">Studio reference voice</span><strong>{currentVoice ? voiceLabel(currentVoice) : 'No allowed voice'}</strong>
+                  <small>{currentVoice?.lang ?? 'Restore a speaker below'} · Daily rotates voices separately</small></div>
+                <div className="voice-card-actions"><button className="ghost small" disabled={!currentVoice} onClick={() => {
+                  setPreviewError(null)
+                  synthesise('The river carried the little boat beyond the old bridge.', { voiceURI, rate, onError: setPreviewError })
+                }}>Preview</button><button className="ghost small" aria-expanded={showVoices} onClick={() => setShowVoices((value) => !value)}>Change voice</button></div>
+              </div>
+              {showVoices && <VoiceLibrary mode="studio" voices={voices} preferences={voicePreferences} selectedURI={voiceURI}
+                onPreferences={updateVoicePreferences} onChoose={(voice) => { onVoice(voice.uri); setPreviewError(null) }} onClose={() => setShowVoices(false)} />}
+              {previewError && <p className="transport-error-banner" role="alert">{previewError}</p>}
 
               <div className="speed-slider-box">
                 <div className="speed-slider-header">

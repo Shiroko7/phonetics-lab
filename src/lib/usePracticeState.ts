@@ -31,6 +31,7 @@ import {
   buildDrill, phraseIndex, type DrillPhrase, type DrillSet,
 } from './phrasebank.ts'
 import { PHONES } from './phones.ts'
+import { contextsForWord } from './context.ts'
 import {
   loadStruggles, saveStruggles, recordWordReports, removeStruggledWord,
   togglePinnedWord, addManualWord, syncStrugglesFromAttempts, isStrugglingLot,
@@ -48,7 +49,7 @@ export interface PracticeProps {
   onReplaceAttempts: (attempts: Attempt[]) => void
   onClearHistory: () => void
   onDeleteAttempt: (index: number) => void
-  onSpeak: (text: string, onEnd?: () => void) => void
+  onSpeak: (text: string, onEnd?: () => void, onError?: (message: string) => void) => void
 }
 
 export type Mode = 'scripted' | 'free'
@@ -173,8 +174,12 @@ export function usePracticeState({
     (phrase: string) => {
       silence()
       if (!phrase) return
+      setError(null)
       setPlaying('target')
-      onSpeak(phrase, () => setPlaying((track) => (track === 'target' ? null : track)))
+      onSpeak(phrase, () => setPlaying((track) => (track === 'target' ? null : track)), (message) => {
+        setPlaying(null)
+        setError(message)
+      })
     },
     [silence, onSpeak],
   )
@@ -302,7 +307,7 @@ export function usePracticeState({
       if (w.length === 0 || alignedResult.length === 0) return
       const reports = byWord(w, alignedResult)
       setStruggles((prev) => {
-        const next = recordWordReports(prev, reports, at)
+        const next = recordWordReports(prev, reports, at, phrase)
         saveStruggles(next)
         return next
       })
@@ -618,6 +623,7 @@ export function usePracticeState({
     (line: string) => {
       silence()
       setMode('scripted')
+      setPhase('idle')
       setAligned(null)
       setHeard([])
       setPlayback(null)
@@ -629,14 +635,18 @@ export function usePracticeState({
     [silence],
   )
 
+  const phrases = useMemo(() => (dict ? phraseIndex(dict) : []), [dict])
+
   const practise = useCallback(
     (drillItem: Drill) => {
-      setLine(drillItem.contrast ? `${drillItem.word}, ${drillItem.contrast.word}` : drillItem.word)
+      if (!dict) return
+      const contextual = contextsForWord(drillItem.word, dict, [text, ...attempts.map((attempt) => attempt.target), ...phrases.map((phrase) => phrase.text)])[0]
+      if (contextual) setLine(contextual)
+      else setError(`Add a full sentence containing ${drillItem.word} in Practice Studio; there is no checked context for this word yet.`)
     },
-    [setLine],
+    [dict, text, attempts, phrases, setLine],
   )
 
-  const phrases = useMemo(() => (dict ? phraseIndex(dict) : []), [dict])
   const sayPhrase = useCallback((phraseItem: DrillPhrase) => setLine(phraseItem.text), [setLine])
 
   const stepTo = useCallback(
@@ -668,8 +678,8 @@ export function usePracticeState({
   const drillWord = useCallback(
     (entry: StruggledWord) => {
       if (!dict) return
-      const built = buildDrillForWord(entry, phrases, dict, { randomize: true })
-      if (built.steps.length === 0) return
+      const built = buildDrillForWord(entry, phrases, dict, { randomize: true, contexts: [text, ...attempts.map((attempt) => attempt.target)] })
+      if (built.steps.length === 0) { setError(`Add a full sentence containing ${entry.display} in Practice Studio first.`); return }
       setSession(built)
       setSessionSource({ type: 'word', word: entry })
       stepTo(0, built)
@@ -677,7 +687,19 @@ export function usePracticeState({
         drillPanel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
       )
     },
-    [phrases, dict, stepTo],
+    [phrases, dict, text, attempts, stepTo],
+  )
+
+  /** Load the first contextual line for a trouble word without starting a full drill. */
+  const practiseWord = useCallback(
+    (entry: StruggledWord) => {
+      if (!dict) return
+      const built = buildDrillForWord(entry, phrases, dict, { randomize: true, contexts: [text, ...attempts.map((attempt) => attempt.target)] })
+      const first = built.steps[0]
+      if (first) setLine(first.phrase.text)
+      else setError(`Add a full sentence containing ${entry.display} in Practice Studio first.`)
+    },
+    [phrases, dict, text, attempts, setLine],
   )
 
   const drillAllTrouble = useCallback(() => {
@@ -685,15 +707,15 @@ export function usePracticeState({
     const targets = struggles.filter(isStrugglingLot)
     const list = targets.length > 0 ? targets : struggles
     if (list.length === 0) return
-    const built = buildDrillForStruggledWords(list, phrases, dict, { randomize: true })
-    if (built.steps.length === 0) return
+    const built = buildDrillForStruggledWords(list, phrases, dict, { randomize: true, contexts: [text, ...attempts.map((attempt) => attempt.target)] })
+    if (built.steps.length === 0) { setError('Add full sentences containing your trouble words in Practice Studio first.'); return }
     setSession(built)
     setSessionSource({ type: 'trouble' })
     stepTo(0, built)
     requestAnimationFrame(() =>
       drillPanel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     )
-  }, [struggles, phrases, dict, stepTo])
+  }, [struggles, phrases, dict, text, attempts, stepTo])
 
   const shuffleCurrentDrill = useCallback(() => {
     if (sessionSource?.type === 'word') {
@@ -821,7 +843,7 @@ export function usePracticeState({
     beginRecording, finishRecording,
     clearHistory: handleClearHistory,
     reopen, removeAttempt, again, setLine, practise, sayPhrase,
-    stepTo, startDrill, drillWord, drillAllTrouble, shuffleCurrentDrill, endDrill,
+    stepTo, startDrill, drillWord, practiseWord, drillAllTrouble, shuffleCurrentDrill, endDrill,
     handleAddWord, removeWord, togglePin, clearTroubles, toggleSound,
     display,
     attempts,

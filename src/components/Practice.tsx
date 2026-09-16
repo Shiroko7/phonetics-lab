@@ -31,6 +31,7 @@ import {
   buildDrill, phraseIndex, phrasesFor, type DrillPhrase, type DrillSet,
 } from '../lib/phrasebank.ts'
 import { PHONES } from '../lib/phones.ts'
+import { contextsForWord } from '../lib/context.ts'
 import {
   loadStruggles, saveStruggles, recordWordReports, removeStruggledWord,
   togglePinnedWord, addManualWord, syncStrugglesFromAttempts, isStrugglingLot,
@@ -363,7 +364,7 @@ export function Practice({
       if (w.length === 0 || alignedResult.length === 0) return
       const reports = byWord(w, alignedResult)
       setStruggles((prev) => {
-        const next = recordWordReports(prev, reports, at)
+        const next = recordWordReports(prev, reports, at, phrase)
         saveStruggles(next)
         return next
       })
@@ -757,16 +758,18 @@ export function Practice({
     [silence],
   )
 
+  /** The curated phrase bank, measured against this dictionary. */
+  const phrases = useMemo(() => phraseIndex(dict), [dict])
+
   /** Load a suggested word as the next thing to say. */
   const practise = useCallback(
     (drill: Drill) => {
-      setLine(drill.contrast ? `${drill.word}, ${drill.contrast.word}` : drill.word)
+      const contextual = contextsForWord(drill.word, dict, [text, ...attempts.map((attempt) => attempt.target), ...phrases.map((phrase) => phrase.text)])[0]
+      if (contextual) setLine(contextual)
+      else setError(`Add a full sentence containing ${drill.word} in Practice Studio; there is no checked context for this word yet.`)
     },
-    [setLine],
+    [dict, text, attempts, phrases, setLine],
   )
-
-  /** The curated phrase bank, measured against this dictionary. */
-  const phrases = useMemo(() => phraseIndex(dict), [dict])
 
   /** Say one curated line on its own, without starting a session. */
   const sayPhrase = useCallback((phrase: DrillPhrase) => setLine(phrase.text), [setLine])
@@ -809,8 +812,8 @@ export function Practice({
   /** Build a targeted drill around a specific trouble word. */
   const drillWord = useCallback(
     (entry: StruggledWord) => {
-      const built = buildDrillForWord(entry, phrases, dict, { randomize: true })
-      if (built.steps.length === 0) return
+      const built = buildDrillForWord(entry, phrases, dict, { randomize: true, contexts: [text, ...attempts.map((attempt) => attempt.target)] })
+      if (built.steps.length === 0) { setError(`Add a full sentence containing ${entry.display} in Practice Studio first.`); return }
       setSession(built)
       setSessionSource({ type: 'word', word: entry })
       stepTo(0, built)
@@ -818,7 +821,17 @@ export function Practice({
         drillPanel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
       )
     },
-    [phrases, dict, stepTo],
+    [phrases, dict, text, attempts, stepTo],
+  )
+
+  const practiseWord = useCallback(
+    (entry: StruggledWord) => {
+      const built = buildDrillForWord(entry, phrases, dict, { randomize: true, contexts: [text, ...attempts.map((attempt) => attempt.target)] })
+      const first = built.steps[0]
+      if (first) setLine(first.phrase.text)
+      else setError(`Add a full sentence containing ${entry.display} in Practice Studio first.`)
+    },
+    [phrases, dict, text, attempts, setLine],
   )
 
   /** Build a drill spanning trouble words. */
@@ -826,15 +839,15 @@ export function Practice({
     const targets = struggles.filter(isStrugglingLot)
     const list = targets.length > 0 ? targets : struggles
     if (list.length === 0) return
-    const built = buildDrillForStruggledWords(list, phrases, dict, { randomize: true })
-    if (built.steps.length === 0) return
+    const built = buildDrillForStruggledWords(list, phrases, dict, { randomize: true, contexts: [text, ...attempts.map((attempt) => attempt.target)] })
+    if (built.steps.length === 0) { setError('Add full sentences containing your trouble words in Practice Studio first.'); return }
     setSession(built)
     setSessionSource({ type: 'trouble' })
     stepTo(0, built)
     requestAnimationFrame(() =>
       drillPanel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
     )
-  }, [struggles, phrases, dict, stepTo])
+  }, [struggles, phrases, dict, text, attempts, stepTo])
 
   /** Re-roll the drill with completely new randomized phrases. */
   const shuffleCurrentDrill = useCallback(() => {
@@ -1649,10 +1662,10 @@ export function Practice({
                     </button>
                     <button
                       className="ghost tiny"
-                      onClick={() => setLine(entry.display)}
-                      title="Load this word into the practice box"
+                      onClick={() => practiseWord(entry)}
+                      title="Load a contextual phrase into the practice box"
                     >
-                      say this
+                      context
                     </button>
                     <button
                       className="tiny accent"

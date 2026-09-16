@@ -25,7 +25,7 @@ export function TroubleBankPanel({ practice, layout = 'compact' }: Props) {
     togglePin,
     removeWord,
     speak,
-    setLine,
+    practiseWord,
     drillWord,
     display,
   } = practice
@@ -179,10 +179,10 @@ export function TroubleBankPanel({ practice, layout = 'compact' }: Props) {
                   </button>
                   <button
                     className="ghost tiny"
-                    onClick={() => setLine(entry.display)}
-                    title="Load into practice prompt"
+                    onClick={() => practiseWord(entry)}
+                    title="Load a contextual phrase into practice"
                   >
-                    Practice
+                    Context
                   </button>
                   <button
                     className="tiny accent"

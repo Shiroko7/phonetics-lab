@@ -15,6 +15,7 @@ import { buildDrill, phrasesFor, type DrillPhrase, type DrillSet, type DrillStep
 import { byWord, flatten, targetWords, type WordReport } from './report.ts'
 import type { Attempt } from './practice.ts'
 import { PHONES } from './phones.ts'
+import { contextsForWord, contextSentences, isPracticeContext } from './context.ts'
 
 export interface WeakPhoneStat {
   phone: string
@@ -46,6 +47,8 @@ export interface StruggledWord {
   recentSaid: string[]
   /** True if the user manually added or pinned this word to their bank */
   pinned?: boolean
+  /** Real sentences in which this word was practised, newest first. */
+  contexts?: string[]
 }
 
 export const STRUGGLES_KEY = 'phonetics-lab:struggles'
@@ -100,6 +103,7 @@ export function recordWordReports(
   bank: StruggledWord[],
   reports: WordReport[],
   at: number,
+  sourceText?: string,
 ): StruggledWord[] {
   const map = new Map<string, StruggledWord>(bank.map((entry) => [entry.word, { ...entry }]))
 
@@ -157,6 +161,13 @@ export function recordWordReports(
         }
       }
     }
+    if (sourceText) {
+      const contexts = contextSentences([sourceText]).filter((text) => {
+        const tokens = text.split(/\s+/).map(normalizeWord)
+        return tokens.length >= 5 && tokens.includes(key)
+      })
+      entry.contexts = [...new Set([...contexts, ...(entry.contexts ?? [])])].slice(0, 8)
+    }
   }
 
   return [...map.values()].sort(sortStruggles)
@@ -184,7 +195,7 @@ export function syncStrugglesFromAttempts(
     const words = targetWords(attempt.target, dict)
     if (words.length === 0 || attempt.aligned.length === 0) continue
     const report = byWord(words, attempt.aligned)
-    bank = recordWordReports(bank, report, attempt.at)
+    bank = recordWordReports(bank, report, attempt.at, attempt.target)
   }
   return bank
 }
@@ -239,7 +250,7 @@ export function togglePinnedWord(bank: StruggledWord[], wordKey: string): Strugg
   return next
 }
 
-/** Construct a synthetic DrillPhrase for arbitrary words or carrier sentences. */
+/** Index the sounds in a supplied practice sentence. */
 export function makePhrase(text: string, focus: string[], dict: Dictionary): DrillPhrase | null {
   const words = targetWords(text, dict)
   const phones = flatten(words)
@@ -255,43 +266,29 @@ export function makePhrase(text: string, focus: string[], dict: Dictionary): Dri
   }
 }
 
-/** Natural carrier sentence templates for drilling words in context. */
-const CARRIER_TEMPLATES = [
-  (w: string) => `Please say ${w} once again.`,
-  (w: string) => `I heard the word ${w} clearly.`,
-  (w: string) => `Try to pronounce ${w} with care.`,
-  (w: string) => `The word ${w} is common in speech.`,
-]
-
 /**
  * Generate a complete, targeted practice drill around a specific trouble word.
  *
- * A complete drill session consists of:
- * 1. The isolated word itself
- * 2. Natural carrier phrase(s) with the word in running speech
- * 3. Phrases from the library that drill the word's weakest phonemes
+ * A complete drill session consists only of contextual speech:
+ * 1. An authored or previously practised sentence containing the word
+ * 2. Additional phrases from the library that drill the word's weakest phonemes
  */
 export function buildDrillForWord(
   entry: StruggledWord,
   bankPhrases: DrillPhrase[],
   dict: Dictionary,
-  options?: { randomize?: boolean },
+  options?: { randomize?: boolean; contexts?: string[] },
 ): DrillSet {
   const steps: DrillStep[] = []
   const usedTexts = new Set<string>()
 
-  // Step 1: The isolated word itself
-  const isolated = makePhrase(entry.display, entry.weakPhones.map((p) => p.phone), dict)
-  if (isolated) {
-    usedTexts.add(isolated.text)
-    const covers = entry.weakPhones.map((p) => ({ phone: p.phone, count: isolated.counts.get(p.phone) ?? 1 }))
-    steps.push({ phrase: isolated, covers })
-  }
-
-  // Step 2: In-context phrase: find curated phrase containing this word, or use natural template
-  const curatedMatch = bankPhrases.find(
-    (p) => !usedTexts.has(p.text) && targetWords(p.text, dict).some((w) => normalizeWord(w.text) === entry.word),
-  )
+  const contexts = contextsForWord(entry.word, dict, [...(entry.contexts ?? []), ...(options?.contexts ?? [])])
+  const candidates = contexts.length ? contexts : bankPhrases.map((phrase) => phrase.text)
+    .filter((text) => isPracticeContext(text, dict, entry.word))
+  const chosen = candidates[options?.randomize ? Math.floor(Math.random() * candidates.length) : 0]
+  const curatedMatch = chosen ? makePhrase(chosen, entry.weakPhones.map((phone) => phone.phone), dict) : null
+  // Missing context is a coverage gap, not a reason to manufacture a carrier.
+  if (!curatedMatch) return { steps: [], missing: entry.weakPhones.map((phone) => phone.phone) }
 
   if (curatedMatch) {
     usedTexts.add(curatedMatch.text)
@@ -302,21 +299,6 @@ export function buildDrillForWord(
       phrase: curatedMatch,
       covers: covers.length > 0 ? covers : [{ phone: entry.weakPhones[0]?.phone ?? 'θ', count: 1 }],
     })
-  } else {
-    // Generate carrier sentence
-    const templateIndex = options?.randomize ? Math.floor(Math.random() * CARRIER_TEMPLATES.length) : 0
-    const carrierText = CARRIER_TEMPLATES[templateIndex](entry.display)
-    const carrier = makePhrase(carrierText, entry.weakPhones.map((p) => p.phone), dict)
-    if (carrier && !usedTexts.has(carrier.text)) {
-      usedTexts.add(carrier.text)
-      const covers = entry.weakPhones
-        .map((p) => ({ phone: p.phone, count: carrier.counts.get(p.phone) ?? 0 }))
-        .filter((c) => c.count > 0)
-      steps.push({
-        phrase: carrier,
-        covers: covers.length > 0 ? covers : [{ phone: entry.weakPhones[0]?.phone ?? 'θ', count: 1 }],
-      })
-    }
   }
 
   // Step 3: Difficult sounds reinforcement: pick drill phrases for the weak sounds
@@ -326,7 +308,7 @@ export function buildDrillForWord(
 
   for (const sound of targetSounds) {
     if (steps.length >= 6) break
-    const matches = phrasesFor(bankPhrases, sound, undefined, 2, options)
+    const matches = phrasesFor(bankPhrases.filter((phrase) => isPracticeContext(phrase.text, dict)), sound, undefined, 2, options)
     for (const phrase of matches) {
       if (usedTexts.has(phrase.text)) continue
       usedTexts.add(phrase.text)
@@ -348,7 +330,7 @@ export function buildDrillForStruggledWords(
   entries: StruggledWord[],
   bankPhrases: DrillPhrase[],
   dict: Dictionary,
-  options?: { randomize?: boolean },
+  options?: { randomize?: boolean; contexts?: string[] },
 ): DrillSet {
   if (entries.length === 0) return { steps: [], missing: [] }
   if (entries.length === 1) return buildDrillForWord(entries[0], bankPhrases, dict, options)
@@ -362,9 +344,7 @@ export function buildDrillForStruggledWords(
     : entries.slice(0, 3)
 
   for (const word of selectedWords) {
-    const templateIndex = options?.randomize ? Math.floor(Math.random() * CARRIER_TEMPLATES.length) : 0
-    const carrierText = CARRIER_TEMPLATES[templateIndex](word.display)
-    const phrase = makePhrase(carrierText, word.weakPhones.map((p) => p.phone), dict)
+    const phrase = buildDrillForWord(word, bankPhrases, dict, options).steps[0]?.phrase
     if (phrase && !usedTexts.has(phrase.text)) {
       usedTexts.add(phrase.text)
       const covers = word.weakPhones
@@ -377,11 +357,13 @@ export function buildDrillForStruggledWords(
     }
   }
 
+  if (!steps.length) return { steps: [], missing: [...new Set(selectedWords.flatMap((word) => word.weakPhones.map((phone) => phone.phone)))] }
+
   // Complement with curated drills targeting the union of weak sounds
   const allWeak = [...new Set(selectedWords.flatMap((w) => w.weakPhones.map((p) => p.phone)))]
   const drillableWeak = allWeak.filter((p) => p in PHONES && p !== 'ɾ' && p !== 'ʔ')
   if (drillableWeak.length > 0) {
-    const soundDrill = buildDrill(bankPhrases, drillableWeak, 5, options)
+    const soundDrill = buildDrill(bankPhrases.filter((phrase) => isPracticeContext(phrase.text, dict)), drillableWeak, 5, options)
     for (const step of soundDrill.steps) {
       if (!usedTexts.has(step.phrase.text) && steps.length < 8) {
         usedTexts.add(step.phrase.text)

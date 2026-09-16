@@ -3,9 +3,14 @@ import { clock, type PracticeState } from '../../lib/usePracticeState.ts'
 interface Props {
   practice: PracticeState
   size?: 'normal' | 'large'
+  referenceDisabled?: boolean
+  referencePlaying?: boolean
+  onReference?: () => void
+  onRecord?: () => void
 }
 
-export function AudioTransport({ practice, size = 'normal' }: Props) {
+export function AudioTransport({ practice, size = 'normal', referenceDisabled, referencePlaying,
+  onReference, onRecord }: Props) {
   const {
     phase,
     playing,
@@ -28,35 +33,16 @@ export function AudioTransport({ practice, size = 'normal' }: Props) {
     <div className={`audio-transport-deck ${size}`}>
       {/* Action buttons bar */}
       <div className="transport-controls-row">
-        <div className="transport-record-col">
-          {phase === 'recording' ? (
-            <button className="record-btn recording" onClick={finishRecording}>
-              <span className="record-dot" />
-              <span className="record-label">Stop &amp; Score</span>
-            </button>
-          ) : (
-            <button
-              className="record-btn idle"
-              onClick={beginRecording}
-              disabled={busy || (mode === 'scripted' && !target)}
-              title="Record your voice"
-            >
-              <span className="record-dot" />
-              <span className="record-label">Record</span>
-            </button>
-          )}
-        </div>
-
         <div className="transport-playback-col">
           {(mode === 'scripted' || target) && (
             <button
-              className={`listen-ref-btn ${playing === 'target' ? 'playing' : ''}`}
-              onClick={() => toggle('target')}
-              disabled={!target || busy || phase === 'recording'}
-              title="Hear native reference pronunciation"
+              className={`listen-ref-btn ${(referencePlaying ?? playing === 'target') ? 'playing' : ''}`}
+              onClick={onReference ?? (() => toggle('target'))}
+              disabled={!target || busy || phase === 'recording' || referenceDisabled}
+              title={referenceDisabled ? 'Record your first take before listening to a reference' : 'Hear reference pronunciation'}
             >
-              <span className="btn-icon">{playing === 'target' ? '■' : '♪'}</span>
-              <span className="btn-label">{playing === 'target' ? 'Stop' : 'Reference'}</span>
+              <span className="btn-icon">{(referencePlaying ?? playing === 'target') ? '■' : '♪'}</span>
+              <span className="btn-label">{(referencePlaying ?? playing === 'target') ? 'Stop' : 'Reference'}</span>
             </button>
           )}
 
@@ -69,6 +55,25 @@ export function AudioTransport({ practice, size = 'normal' }: Props) {
             >
               <span className="btn-icon">{playing === 'mine' ? '■' : '▶'}</span>
               <span className="btn-label">{playing === 'mine' ? 'Stop' : 'Your Take'}</span>
+            </button>
+          )}
+        </div>
+
+        <div className="transport-record-col">
+          {phase === 'recording' ? (
+            <button className="record-btn recording" onClick={finishRecording}>
+              <span className="record-dot" />
+              <span className="record-label">Stop &amp; Score</span>
+            </button>
+          ) : (
+            <button
+              className="record-btn idle"
+              onClick={onRecord ?? beginRecording}
+              disabled={busy || (mode === 'scripted' && !target)}
+              title="Record your voice"
+            >
+              <span className="record-dot" />
+              <span className="record-label">Record</span>
             </button>
           )}
         </div>

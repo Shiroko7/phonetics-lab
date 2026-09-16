@@ -1,8 +1,9 @@
 """
 The local scoring service.
 
-Runs on this machine only. Nothing is uploaded anywhere: the browser posts its
-samples to localhost, the GPU scores them, and the JSON comes back. The app
+Speech recordings are scored on this machine: the browser posts its samples
+to localhost, the GPU scores them, and the JSON comes back. Free online reference
+voices send reference text (not recordings) to Microsoft's Edge speech service. The app
 works without it — the in-browser recogniser stays as the fallback — so this is
 the high-accuracy path rather than a dependency.
 """
@@ -27,11 +28,13 @@ from .models import (
     TranscribeResponse,
 )
 from .recognize import MODELS, PHONEME_MODEL, WORD_MODEL, pick_device
+from .voice import router as voice_router
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("phonetics")
 
 app = FastAPI(title="phonetics-lab scoring", version="0.1.0")
+app.include_router(voice_router)
 
 # The Vite dev server is a different origin from this one. Localhost only —
 # there is no reason for anything else to reach a service holding a microphone

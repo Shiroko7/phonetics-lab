@@ -33,6 +33,20 @@ import {
   recordWordReports, isStruggleReport, isStrugglingLot, addManualWord,
   removeStruggledWord, togglePinnedWord, buildDrillForWord, buildDrillForStruggledWords,
 } from '../src/lib/struggles.ts'
+import {
+  buildDailyQueue, cardIdForSound, recordDailyReview, startDailySession,
+  localDateKey, summaryForDay, syncCandidates,
+} from '../src/lib/daily.ts'
+import { automaticDailyOutcome } from '../src/lib/dailyDecision.ts'
+import {
+  advanceRoutine, changeRoutineVoice, contrastsForCard, exposeRoutineStep, markReferenceHeard, planDailyRoutine, refreshLegacyContexts, refreshRoutineVoices,
+  recordRoutineEvent, referenceVoicePool, routineCardRating, routineSummary, sentenceFitsCard, updateRoutine,
+} from '../src/lib/dailyRoutine.ts'
+import { DAILY_TRAINING_SENTENCES, DAILY_TRANSFER_SENTENCES, LISTENING_CONTRASTS } from '../src/data/dailyContent.ts'
+import { loadDailyState, saveDailyState } from '../src/lib/daily.ts'
+import { defaultVoice, stop as stopSpeech, synthesise } from '../src/lib/speech.ts'
+import { contextsForWord, isPracticeContext, isWordCarrier } from '../src/lib/context.ts'
+import { excludeVoice, isExcluded, loadVoicePreferences, saveVoicePreferences, uniqueEnglishVoices, voiceKey, VOICE_PREFERENCES_KEY } from '../src/lib/voicePreferences.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -587,12 +601,363 @@ group('trouble words bank tracks struggles, persistence and targeted drills', ()
   // Generate targeted drill around the struggled word
   const wordDrill = buildDrillForWord(twiceStruggled, bankPhrases, dict, { randomize: true })
   check('drill for word has steps', wordDrill.steps.length >= 3, true)
-  check('first step is the target word', wordDrill.steps[0].phrase.text, 'think')
+  check('first step keeps the word in context', wordDrill.steps[0].phrase.text.includes('think'), true)
+  check('first step is not an isolated word', wordDrill.steps[0].phrase.text.trim() !== 'think', true)
   check('drills the weak phone /θ/', wordDrill.steps.some((s) => s.covers.some((c) => c.phone === 'θ')), true)
 
   // Multi-word drill
   const multiDrill = buildDrillForStruggledWords([twiceStruggled], bankPhrases, dict, { randomize: true })
   check('multi-word drill has steps', multiDrill.steps.length >= 3, true)
+})
+
+group('daily deck schedules retention rather than a finite course', () => {
+  const base = Date.parse('2026-09-15T09:00:00')
+  let state = { cards: [], reviews: [], sessions: [] }
+  state = syncCandidates(state, [{
+    id: cardIdForSound('Î¸', 's'),
+    kind: 'sound',
+    label: '/Î¸/ â†’ /s/',
+    focusPhones: ['Î¸'],
+    confusion: 's',
+  }], base)
+  check('a new card is immediately due', buildDailyQueue(state.cards, 8, base).length, 1)
+
+  const started = startDailySession(state, 8, base)
+  check('daily session contains the new card', started.session.queue[0], 'sound:Î¸:s')
+  state = started.state
+
+  const first = recordDailyReview(state, {
+    cardId: 'sound:Î¸:s', sessionId: started.session.id, prompt: 'Think clearly.',
+    rating: 'good', reviewedAt: base, focusScore: 100, overallScore: 92,
+  })
+  state = first.state
+  check('good moves a card into review', state.cards[0].state, 'review')
+  check('good schedules a future review', state.cards[0].dueAt > base, true)
+  check('review is recorded separately from attempts', state.reviews.length, 1)
+
+  const secondAt = state.cards[0].dueAt + 1
+  const nextSession = startDailySession(state, 8, secondAt)
+  state = nextSession.state
+  const second = recordDailyReview(state, {
+    cardId: 'sound:Î¸:s', sessionId: nextSession.session.id, prompt: 'Three things.',
+    rating: 'again', repeatNow: true, reviewedAt: secondAt, focusScore: 20, overallScore: 61,
+  })
+  state = second.state
+  check('again returns a learned card to relearning', state.cards[0].state, 'relearning')
+  check('again shortens the next interval', state.cards[0].dueAt < secondAt + 2 * 24 * 60 * 60 * 1000, true)
+  check('an explicit repeat keeps the card next', state.sessions.find((s) => s.id === nextSession.session.id).queue[1], 'sound:Î¸:s')
+  check('daily summary counts the first rating', summaryForDay(state, localDateKey(base)).reviews, 1)
+  check('daily summary counts the later rating', summaryForDay(state, localDateKey(secondAt)).reviews, 1)
+})
+
+group('daily scoring uses tolerance bands rather than perfection', () => {
+  const step = (verdict, actual = 's') => ({
+    expected: 'θ', actual, verdict, distance: verdict === 'correct' ? 0 : 0.2,
+    expectedIndex: 0, start: null, end: null,
+  })
+  const score = (overall) => ({ overall, correct: 1, close: 0, wrong: 0, missing: 0, extra: 0 })
+
+  const close = automaticDailyOutcome(['θ'], [step('close')], score(92), [])
+  check('a close target is not forced to repeat', close.retry, false)
+  check('a close target keeps a conservative rating', close.rating, 'hard')
+
+  for (const overall of [90, 92, 95, 100]) {
+    for (const verdict of ['wrong', 'missing']) {
+      const outcome = automaticDailyOutcome(['θ'], [step(verdict, verdict === 'missing' ? null : 'k')], score(overall), [])
+      check(`${overall} is enough despite a ${verdict} target`, outcome.retry, false)
+      check(`${overall} with a ${verdict} target keeps a conservative review`, outcome.rating, 'hard')
+    }
+    const poorWord = automaticDailyOutcome(['θ'], [step('correct', 'θ')], score(overall), [{ score: 60 }])
+    check(`${overall} is enough despite a flagged word`, poorWord.retry, false)
+    check(`${overall} with a flagged word keeps a conservative review`, poorWord.rating, 'hard')
+  }
+
+  const gross = automaticDailyOutcome(['θ'], [step('wrong', 'k')], score(89), [])
+  check('a target error below 90 suggests another pass', gross.retry, true)
+  const poorWord = automaticDailyOutcome(['θ'], [step('correct', 'θ')], score(89), [{ score: 60 }])
+  check('a flagged word below 90 suggests another pass', poorWord.retry, true)
+
+  const good = automaticDailyOutcome(['θ'], [step('correct', 'θ')], score(90), [])
+  check('90 is enough for a good take', good.retry, false)
+  check('a clean 90 keeps its good rating', good.rating, 'good')
+  check('a clean 95 keeps its easy rating', automaticDailyOutcome(['θ'], [step('correct', 'θ')], score(95), []).rating, 'easy')
+  check('a usable 89 can still move on', automaticDailyOutcome(['θ'], [step('correct', 'θ')], score(89), []).retry, false)
+  check('a missing score does not pass', automaticDailyOutcome(['θ'], [step('correct', 'θ')], null, []).retry, true)
+  check('an unavailable target does not pass', automaticDailyOutcome(['s'], [step('correct', 'θ')], score(90), []).retry, true)
+
+  const low = automaticDailyOutcome(['θ'], [step('correct', 'θ')], score(77), [])
+  check('a low whole-line score asks for another pass', low.retry, true)
+})
+
+group('Daily varies contexts and voices without leaking transfer sentences', () => {
+  const base = Date.parse('2026-09-15T09:00:00')
+  const voices = [{ uri: 'one', name: 'One', lang: 'en-US' }, { uri: 'two', name: 'Two', lang: 'en-US' }, { uri: 'three', name: 'Three', lang: 'en-GB' }]
+  check('automatic voices match the American dictionary', referenceVoicePool(voices).map((v) => v.uri).join(','), 'one,two')
+  check('other English accents can be enabled', referenceVoicePool(voices, { excluded: [], accent: 'all' }).length, 3)
+  check('zero voices never invents a reference', referenceVoicePool([]).length, 0)
+  const preferred = { uri: 'brian', name: 'Microsoft Brian Online (Natural)', lang: 'en-US', local: false }
+  check('Brian wins over installed voices', defaultVoice([...voices, preferred]).uri, 'brian')
+  check('Daily prefers natural voices over robotic alternatives', referenceVoicePool([...voices, preferred]).map((v) => v.uri).join(','), 'brian')
+  const andrew = { ...preferred, uri: 'andrew', name: 'Andrew (Natural · free online)', source: 'edge' }
+  check('Daily automatically includes other natural speakers', referenceVoicePool([...voices, preferred, andrew]).length, 2)
+  for (const contrast of LISTENING_CONTRASTS) {
+    const [a, b] = contrast.words.map((word) => expectedPhones(dict.get(word)?.[0] ?? ''))
+    check(`checked contrast ${contrast.words.join('/')} differs by one phone`, a.length === b.length && a.filter((phone, i) => phone !== b[i]).length === 1, true)
+    for (const frame of contrast.frames) for (const word of contrast.words) {
+      const sentence = frame.replace('{word}', word)
+      check(`connected listening context: ${sentence}`, isPracticeContext(sentence, dict, word), true)
+    }
+  }
+  for (const text of [...DAILY_TRAINING_SENTENCES, ...DAILY_TRANSFER_SENTENCES]) {
+    check(`known words: ${text}`, analyze(text, dict).stats.unknown, 0)
+    check(`no word-in-a-slot templates: ${text}`, isWordCarrier(text), false)
+  }
+  const uncovered = []
+  for (const phone of Object.keys(PHONES).filter((phone) => !['ɾ', 'ʔ'].includes(phone))) {
+    let state = syncCandidates({ cards: [], reviews: [], sessions: [] }, [
+      { id: phone, kind: 'sound', label: phone, focusPhones: [phone] },
+    ], base)
+    const started = startDailySession(state, 2, base)
+    const routine = planDailyRoutine(started.state, started.session, dict, voices, [], () => 0.37)
+    const spoken = routine.steps.filter((step) => step.kind !== 'listening')
+    if (spoken.filter((step) => step.kind === 'production').length < 2 || !spoken.some((step) => step.kind === 'transfer')) uncovered.push(phone)
+    check(`all spoken contexts include ${phone}`, spoken.every((step) => sentenceFitsCard(step.prompt, state.cards[0], dict)), true)
+    check(`two distinct rehearsal sentences for ${phone}`, new Set(spoken.filter((step) => step.kind === 'production').map((step) => step.prompt)).size, 2)
+    const transfer = routine.steps.find((step) => step.kind === 'transfer')
+    check(`unfamiliar text is held out for ${phone}`, !routine.steps.filter((step) => step !== transfer).some((step) => (step.options ?? [step.prompt]).includes(transfer?.prompt)), true)
+  }
+  check('each expected sound has training and transfer coverage', uncovered.join(' '), '')
+  let state = syncCandidates({ cards: [], reviews: [], sessions: [] }, [
+    { id: 'word:think', kind: 'word', label: 'think', word: 'think', focusPhones: ['θ'], confusion: 's' },
+  ], base)
+  const started = startDailySession(state, 2, base)
+  const routine = planDailyRoutine(started.state, started.session, dict, voices.slice(0, 2), [], () => 0.1)
+  check('word targets cannot be credited by unrelated sentences', routine.steps.filter((step) => step.kind !== 'listening').every((step) => /\bthink\b/i.test(step.prompt)), true)
+  check('known confusion receives its matching contrast', contrastsForCard(state.cards[0], dict)[0].pair.includes('s'), true)
+  const listening = routine.steps.filter((step) => step.kind === 'listening')
+  check('listening changes reference voice', listening[0].voiceURI !== listening[1].voiceURI, true)
+  check('both answer positions are used', new Set(listening.map((step) => step.answer)).size, 2)
+  const transfer = routine.steps.find((step) => step.kind === 'transfer')
+  const revised = planDailyRoutine(started.state, started.session, dict, voices, [transfer.prompt], () => 0.1)
+  check('Studio attempts exclude seen text from transfer', revised.steps.find((step) => step.kind === 'transfer').prompt !== transfer.prompt, true)
+  const atTransfer = { ...routine, cursor: routine.steps.indexOf(transfer) }
+  state = exposeRoutineStep(updateRoutine(started.state, started.session.id, atTransfer), started.session.id, base)
+  const textOnScreen = state.sessions[0].routine.steps[atTransfer.cursor].prompt
+  const resumed = exposeRoutineStep(state, started.session.id, base + 100)
+  check('resuming a displayed transfer does not mark it familiar to itself', resumed.sessions[0].routine.steps[atTransfer.cursor].fresh, true)
+  check('displayed transfer survives a new plan as used', planDailyRoutine(state, started.session, dict, voices, [], () => 0.1).steps.find((step) => step.kind === 'transfer').prompt !== textOnScreen, true)
+  const storage = new Map()
+  const priorStorage = globalThis.localStorage
+  globalThis.localStorage = { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v) }
+  saveDailyState(state)
+  const restored = loadDailyState()
+  check('session plan and exposure survive reload', JSON.stringify(restored.sessions), JSON.stringify(state.sessions))
+  globalThis.localStorage = priorStorage
+})
+
+group('voice rotation respects exclusions, current choices and immutable history', () => {
+  const brian = { uri: 'brian-online', name: 'Brian Multilingual (Natural · free online)', lang: 'en-US', source: 'edge' }
+  const duplicate = { ...brian, uri: 'brian-browser', name: 'Microsoft Brian Online (Natural) - English (United States)', source: 'browser' }
+  const emma = { ...brian, uri: 'emma', name: 'Emma (Natural · free online)' }
+  const andrew = { ...brian, uri: 'andrew', name: 'Andrew (Natural · free online)' }
+  const robotic = { ...brian, uri: 'david', name: 'Microsoft David Desktop', source: 'browser' }
+  const voices = [duplicate, brian, emma, andrew, robotic]
+  let preferences = { accent: 'en-US', excluded: [] }
+  check('duplicate online/browser speaker has a shared identity', voiceKey(brian), voiceKey(duplicate))
+  check('duplicates do not inflate speaker variation', uniqueEnglishVoices(voices).length, 4)
+  preferences = excludeVoice(preferences, brian)
+  check('exclusion covers the browser duplicate too', isExcluded(duplicate, preferences), true)
+  check('excluded Brian cannot return through a default fallback', referenceVoicePool(voices, preferences).some((voice) => voiceKey(voice) === voiceKey(brian)), false)
+  const storage = new Map()
+  const oldStorage = globalThis.localStorage
+  globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) }
+  saveVoicePreferences(preferences)
+  check('exclusions and accent survive reload', JSON.stringify(loadVoicePreferences()), JSON.stringify(preferences))
+  storage.set(VOICE_PREFERENCES_KEY, '{broken')
+  check('corrupted preferences recover safely', loadVoicePreferences().excluded.length, 0)
+  globalThis.localStorage = oldStorage
+
+  const event = { id: 'e1', stepId: 'past', voiceURI: brian.uri, status: 'answered', first: true, correct: true }
+  const routine = { version: 1, cursor: 1, events: [event], notices: [], steps: [
+    { id: 'past', voiceURI: brian.uri, prompt: 'Past sentence.' },
+    { id: 'now', voiceURI: brian.uri, referenceHeard: true, prompt: 'Current sentence.' },
+    { id: 'later', voiceURI: brian.uri, prompt: 'Next sentence.' },
+    { id: 'last', voiceURI: brian.uri, prompt: 'Final sentence.' },
+  ] }
+  const pool = referenceVoicePool(voices, preferences)
+  const revised = refreshRoutineVoices(routine, pool, () => .3)
+  check('exclusion preserves recorded voice provenance', JSON.stringify(revised.events), JSON.stringify(routine.events))
+  check('completed step is untouched', revised.steps[0], routine.steps[0])
+  check('pending steps use only allowed speakers', revised.steps.slice(1).every((step) => pool.some((voice) => voice.uri === step.voiceURI)), true)
+  check('new voice requires another complete listen', revised.steps[1].referenceHeard, false)
+  check('rotation repair leaves prompts and step IDs alone', revised.steps.map((step) => `${step.id}:${step.prompt}`).join('|'), routine.steps.map((step) => `${step.id}:${step.prompt}`).join('|'))
+  check('adjacent pending cards change speaker', revised.steps.slice(2).every((step, index) => step.voiceURI !== revised.steps[index + 1].voiceURI), true)
+  check('reload cannot reroll repaired voices', refreshRoutineVoices(revised, pool), revised)
+  const explicit = changeRoutineVoice({ ...revised, cursor: 2 }, revised.steps[1].voiceURI)
+  check('another voice is not undone by automatic rotation', refreshRoutineVoices(explicit, pool).steps[2].voiceURI, revised.steps[1].voiceURI)
+  preferences = excludeVoice(excludeVoice(preferences, emma), andrew)
+  check('excluding every natural voice does not activate robotic fallbacks', referenceVoicePool(voices, preferences).length, 0)
+  check('empty pool never resurrects a blocked voice', refreshRoutineVoices(revised, []).steps[1].voiceURI, undefined)
+  check('one remaining voice is reusable', refreshRoutineVoices(revised, [emma]).steps.slice(1).every((step) => step.voiceURI === emma.uri), true)
+
+  const base = Date.parse('2026-09-15T09:00:00')
+  const state = syncCandidates({ cards: [], reviews: [], sessions: [] }, [
+    { id: 'theta', kind: 'sound', label: 'theta', focusPhones: ['θ'] },
+    { id: 'ship', kind: 'sound', label: 'ship', focusPhones: ['ʃ'] },
+  ], base)
+  const started = startDailySession(state, 2, base)
+  const plan = planDailyRoutine(started.state, started.session, dict, [brian, emma, andrew], [], () => .3)
+  check('voices rotate in final on-screen order, not target-building order', plan.steps.slice(1).every((step, index) => step.voiceURI !== plan.steps[index].voiceURI), true)
+  check('use the whole pool before repeating a speaker', new Set(plan.steps.slice(0, 3).map((step) => step.voiceURI)).size, 3)
+})
+
+group('word practice uses real contexts and migrates only pending carrier exercises', () => {
+  const base = Date.parse('2026-09-15T09:00:00')
+  const word = 'astronomer'
+  const source = 'The astronomer watched the comet above the valley.'
+  const focusPhones = expectedPhones(dict.get(word)[0]).slice(0, 2)
+  const entry = { word, display: word, ipa: dict.get(word)[0], weakPhones: focusPhones.map((phone) => ({ phone, count: 1 })) }
+  check('uncovered word never gets a fabricated drill', buildDrillForWord(entry, [], dict).steps.length, 0)
+  check('a supplied sentence can become a word drill', buildDrillForWord({ ...entry, contexts: [source] }, [], dict).steps[0].phrase.text, source)
+  check('a single word is not a sentence', contextsForWord(word, dict, [word]).length, 0)
+  check('old unquoted carrier is rejected', isPracticeContext(`Please say ${word} once again.`, dict, word), false)
+  check('old quoted carrier is rejected', isPracticeContext(`The storyteller used "${word}" while describing the journey.`, dict, word), false)
+  const reportWords = targetWords(source, dict)
+  const reports = byWord(reportWords, alignPhones(flatten(reportWords), []))
+  const saved = recordWordReports([], reports, base, source).find((item) => item.word === word)
+  check('trouble bank retains the original sentence', saved.contexts[0], source)
+
+  let state = syncCandidates({ cards: [], reviews: [], sessions: [] }, [{ id: word, kind: 'word', word, label: word, focusPhones }], base)
+  const start = startDailySession(state, 2, base)
+  const noContext = planDailyRoutine(start.state, start.session, dict, [])
+  check('Daily does not pretend to practise an uncovered word', noContext.steps.some((step) => step.kind === 'production'), false)
+  check('Daily explains missing contexts', noContext.notices.some((text) => text.includes('no meaningful practice sentences')), true)
+  const withContext = planDailyRoutine(start.state, start.session, dict, [], [source])
+  check('Daily reuses the actual source sentence', withContext.steps.find((step) => step.kind === 'production').prompt, source)
+  check('source sentences cannot masquerade as unfamiliar tests', withContext.steps.some((step) => step.kind === 'transfer' && step.prompt === source), false)
+
+  state = syncCandidates({ cards: [], reviews: [], sessions: [] }, [{ id: 'think', kind: 'word', word: 'think', label: 'think', focusPhones: ['θ'] }], base)
+  const started = startDailySession(state, 2, base)
+  const legacy = { version: 1, cursor: 1, notices: [], steps: [
+    { id: 'past', cardId: 'think', kind: 'production', prompt: 'The scholar explained why "think" appeared in the ancient text.' },
+    { id: 'pending', cardId: 'think', kind: 'production', prompt: 'She repeated "think" before continuing the story.', referenceHeard: true, exposedAt: base },
+    { id: 'held-out', cardId: 'think', kind: 'transfer', prompt: 'A traveler remembered hearing "think" during the announcement.', fresh: true },
+  ], events: [{ id: 'saved-score', stepId: 'past', cardId: 'think', kind: 'production', status: 'scored', prompt: 'The scholar explained why "think" appeared in the ancient text.', first: true, overallScore: 83, at: base }] }
+  state = updateRoutine(started.state, started.session.id, legacy)
+  const refreshed = refreshLegacyContexts(state, state.sessions[0], dict, [])
+  check('recorded history remains byte-for-byte intact', JSON.stringify(refreshed.events), JSON.stringify(legacy.events))
+  check('completed prompts remain as recorded', refreshed.steps[0].prompt, legacy.steps[0].prompt)
+  check('pending prompts now have meaningful contexts', refreshed.steps.slice(1).every((step) => isPracticeContext(step.prompt, dict, 'think')), true)
+  check('replacements must be listened to again', !!refreshed.steps[1].referenceHeard, false)
+  check('migration cannot load stale scoring against a new prompt', refreshed.steps[1].id !== legacy.steps[1].id, true)
+  state = updateRoutine(state, started.session.id, refreshed)
+  check('natural plans never reroll on reload', refreshLegacyContexts(state, state.sessions[0], dict, []), undefined)
+})
+
+group('Daily preserves first responses and schedules only independent evidence', () => {
+  const base = Date.parse('2026-09-15T09:00:00')
+  let state = syncCandidates({ cards: [], reviews: [], sessions: [] }, [{ id: 'target', kind: 'sound', label: 'θ', focusPhones: ['θ'], confusion: 's' }], base)
+  const start = startDailySession(state, 2, base)
+  const id = start.session.id
+  state = updateRoutine(start.state, id, planDailyRoutine(start.state, start.session, dict, [{ uri: 'one', lang: 'en-US' }], [], () => 0.2))
+  let routine = state.sessions[0].routine
+  const firstStep = routine.steps[0]
+  const unheard = recordRoutineEvent(state, id, { stepId: firstStep.id, status: 'answered', choice: firstStep.answer, at: base })
+  check('cannot answer unheard audio', unheard.sessions[0].routine.events.length, 0)
+  state = markReferenceHeard(state, id, 'one')
+  state = recordRoutineEvent(state, id, { stepId: firstStep.id, status: 'answered', choice: 1 - firstStep.answer, at: base + 1 })
+  state = recordRoutineEvent(state, id, { stepId: firstStep.id, status: 'answered', choice: firstStep.answer, at: base + 2 })
+  check('answer cannot be replaced after feedback', state.sessions[0].routine.events.length, 1)
+  check('incorrect first answer stays incorrect', state.sessions[0].routine.events[0].correct, false)
+  state = advanceRoutine(state, id, base + 3)
+  state = advanceRoutine(state, id, base + 4)
+  check('skipped listening does not count as wrong', routineSummary(state.sessions).listening.count, 1)
+  for (let i = 0; i < 2; i++) {
+    routine = state.sessions[0].routine
+    const step = routine.steps[routine.cursor]
+    state = recordRoutineEvent(state, id, { stepId: step.id, status: 'scored', overallScore: 98, rating: 'easy', attemptAt: base + 10 + i, at: base + 10 + i })
+    state = advanceRoutine(state, id, base + 12 + i)
+  }
+  routine = state.sessions[0].routine
+  const step = routine.steps[routine.cursor]
+  state = exposeRoutineStep(state, id, base + 15)
+  const input = { stepId: step.id, status: 'scored', overallScore: 71, rating: 'again', attemptAt: base + 20, at: base + 20 }
+  state = recordRoutineEvent(state, id, input)
+  state = recordRoutineEvent(state, id, input)
+  check('duplicate scoring callback is idempotent', state.sessions[0].routine.events.filter((event) => event.stepId === step.id).length, 1)
+  state = markReferenceHeard(state, id, 'one')
+  state = recordRoutineEvent(state, id, { ...input, overallScore: 100, rating: 'easy', attemptAt: base + 30, at: base + 30 })
+  check('extra takes do not change transfer scores', routineSummary(state.sessions).transfer.average, 71)
+  check('repetitions are recorded separately', routineSummary(state.sessions).repetitions, 1)
+  check('weak transfer controls an otherwise high rehearsal score', routineCardRating(state.sessions[0].routine.events), 'again')
+  state = advanceRoutine(state, id, base + 40)
+  check('one target receives one schedule update', state.reviews.length, 1)
+  check('finishing ends the session', !!state.sessions[0].endedAt, true)
+  check('repeat calls cannot schedule it twice', advanceRoutine(state, id, base + 50).reviews.length, 1)
+  const later = startDailySession(state, 2, state.cards[0].dueAt + 24 * 60 * 60 * 1000)
+  const laterPlan = planDailyRoutine(later.state, later.session, dict, [], [], () => 0.2)
+  check('later review begins with delayed recall', laterPlan.steps[0].kind, 'recall')
+  check('a successful listening answer cannot manufacture speech progress', routineCardRating([{ kind: 'listening', first: true, status: 'answered', correct: true }]), null)
+  check('rehearsal alone keeps a conservative interval', routineCardRating([{ kind: 'production', first: true, status: 'scored', rating: 'easy' }]), 'hard')
+  const mixed = routineSummary([{ routine: { events: [
+    { kind: 'production', first: true, status: 'scored', overallScore: 50, scorer: 'gop', revision: 1 },
+    { kind: 'production', first: true, status: 'scored', overallScore: 100, scorer: 'browser' },
+  ] } }])
+  check('different scorers are not averaged together', mixed.production.average, null)
+  let limited = syncCandidates({ cards: [], reviews: [], sessions: [] }, ['θ', 's', 'i', 'ɪ'].map((phone) => ({
+    id: phone, kind: 'sound', label: phone, focusPhones: [phone],
+  })), base)
+  const intake = startDailySession(limited, 4, base)
+  check('only two new targets enter the first session', intake.session.queue.length, 2)
+  limited = intake.state
+  for (const cardId of intake.session.queue) limited = recordDailyReview(limited, {
+    cardId, sessionId: intake.session.id, prompt: 'We think the ship is ready.', rating: 'good', reviewedAt: base + 100,
+  }).state
+  check('another session cannot introduce two more targets today', startDailySession(limited, 4, base + 200).session, null)
+})
+
+await group('online reference cancellation and errors never count as heard audio', async () => {
+  const originalFetch = globalThis.fetch
+  const OriginalAudio = globalThis.Audio
+  const pending = []
+  const played = []
+  let ended = 0
+  let errors = 0
+  globalThis.fetch = () => new Promise((resolve) => pending.push(resolve))
+  globalThis.Audio = class {
+    constructor(url) { this.url = url; played.push(this) }
+    play() { return Promise.resolve() }
+    pause() {}
+  }
+  const finishFetch = () => pending.shift()({ ok: true, blob: async () => new Blob(['audio'], { type: 'audio/mpeg' }) })
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0))
+  const options = { voiceURI: 'edge:en-US-BrianMultilingualNeural', onEnd: () => ended++, onError: () => errors++ }
+  try {
+    synthesise('The traveler crossed the old bridge.', options)
+    stopSpeech()
+    finishFetch()
+    await settle()
+    check('a cancelled late response never starts audio', played.length, 0)
+    check('cancellation cannot unlock a listening answer', ended, 0)
+    check('deliberate cancellation is not a playback error', errors, 0)
+    synthesise('The sailor opened the garden gate.', options)
+    finishFetch()
+    await settle()
+    check('downloading audio does not mean it was heard', ended, 0)
+    played[0].onerror()
+    check('an audio decoding error is reported', errors, 1)
+    check('an audio decoding error is not successful playback', ended, 0)
+    synthesise('The river flowed beyond the village.', options)
+    finishFetch()
+    await settle()
+    played[1].onended()
+    played[1].onended()
+    check('completed playback unlocks exactly once', ended, 1)
+  } finally {
+    stopSpeech()
+    globalThis.fetch = originalFetch
+    globalThis.Audio = OriginalAudio
+  }
 })
 
 console.log(failures === 0 ? '\nall checks passed' : `\n${failures} check(s) failed`)

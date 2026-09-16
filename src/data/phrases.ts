@@ -36,6 +36,63 @@ export interface CuratedPhrase {
 }
 
 export const PHRASE_BANK: CuratedPhrase[] = [
+  /*
+   * Original contextual lines, written for this drill bank rather than copied
+   * from a source. Their texture borrows from public-domain fantasy/adventure
+   * and modern report-like prose: a concrete setting, a clear action, and a
+   * reason for the sentence to exist. The target sound must still survive in
+   * connected speech, which is why these replace isolated-word examples.
+   */
+  { text: 'The thief thought the southern gate was unlocked.', focus: ['θ'], pair: ['θ', 's'] },
+  { text: 'Three sailors crossed the southern sea before sunset.', focus: ['θ'], pair: ['θ', 's'] },
+  { text: 'The silver key slid beneath the loose stone.', focus: ['s'] },
+  { text: 'The keeper believed the beacon would guide us home.', focus: ['i'] },
+  { text: 'The little griffin slipped beneath the bridge.', focus: ['ɪ'] },
+  { text: 'The black cat sprang across the cracked tablet.', focus: ['æ'] },
+  { text: 'The messenger left a red feather beside the desk.', focus: ['ɛ'] },
+  { text: 'The scholar marked the map with a dark star.', focus: ['ɑ'] },
+  { text: 'The old lord brought a torch through the hall.', focus: ['ɔ'] },
+  { text: 'The cook could put the wooden bowl away.', focus: ['ʊ'] },
+  { text: 'The moon moved through the blue mist.', focus: ['u'] },
+  { text: 'The young hunter hurried under the summer rain.', focus: ['ʌ'] },
+  { text: 'A forgotten letter appeared beneath the paper.', focus: ['ə'] },
+  { text: 'The pale dragon waited beside the broken gate.', focus: ['eɪ'] },
+  { text: 'I might find the hidden sign by midnight.', focus: ['aɪ'] },
+  { text: 'The royal envoy avoided the noisy tavern.', focus: ['ɔɪ'] },
+  { text: 'The old road curved below the lonely tower.', focus: ['oʊ'] },
+  { text: 'The proud scout found a route around the mountain.', focus: ['aʊ'] },
+  { text: 'The merchant heard a distant warning near the frontier.', focus: ['ɝ'] },
+  { text: 'The traveler entered the darker chamber at sunset.', focus: ['ɚ'] },
+  { text: 'The pale prince placed a map beside the plate.', focus: ['p'] },
+  { text: 'A blue banner broke loose above the bridge.', focus: ['b'] },
+  { text: 'The captain lifted the lantern toward the tower.', focus: ['t'] },
+  { text: 'The guard drew a dagger from the drawer.', focus: ['d'] },
+  { text: 'The cart crossed the cracked cobblestone road.', focus: ['k'] },
+  { text: 'The gatekeeper gathered green glass from the garden.', focus: ['ɡ'] },
+  { text: 'The fox followed a faint footprint through the frost.', focus: ['f'] },
+  { text: 'The river curved around the village wall.', focus: ['v'] },
+  { text: 'The weather turned warmer as they crossed the heath.', focus: ['ð'] },
+  { text: "The wizard's pages rustled as the candles dimmed.", focus: ['z'] },
+  { text: 'She pushed the shining shell beneath the shelf.', focus: ['ʃ'] },
+  { text: "The treasure's unusual vision confused the guide.", focus: ['ʒ'] },
+  { text: 'The watchman chose a chair beside the chimney.', focus: ['tʃ'] },
+  { text: "The judge searched the giant's jacket.", focus: ['dʒ'] },
+  { text: 'The moonlit messenger moved through the marsh.', focus: ['m'] },
+  { text: 'No one knew when the northern bell would ring.', focus: ['n'] },
+  { text: 'The king was waiting among the long grass.', focus: ['ŋ'] },
+  { text: 'The little lantern lit the lower landing.', focus: ['l'] },
+  { text: 'The ranger rode toward the red ridge.', focus: ['ɹ'] },
+  { text: 'We watched the white wings rise above the water.', focus: ['w'] },
+  { text: 'The young sailor used a yellow map.', focus: ['j'] },
+  { text: 'The hidden hero held his breath.', focus: ['h'] },
+  { text: 'By dawn, the party had mapped the northern passage.', focus: ['d'] },
+  { text: 'The healer warned that the potion would not last.', focus: ['w'] },
+  { text: 'After the signal faded, the scouts returned to camp.', focus: ['s'] },
+  { text: 'The archive recorded three unusual changes in the valley.', focus: ['tʃ'] },
+  { text: 'The system displayed a warning before the bridge collapsed.', focus: ['d'] },
+  { text: 'The report found a small but meaningful change.', focus: ['f'] },
+  { text: 'The council agreed to postpone the final decision.', focus: ['ə'] },
+
   // ── Monophthongs ───────────────────────────────────────────────────────
   // /i/
   { text: 'Please keep these three clean sheets.', focus: ['i'] },

@@ -8,6 +8,8 @@ import {
   stop,
   synthesise,
   warmUp,
+  defaultVoice,
+  isBrianVoice,
   type Voice,
 } from './lib/speech.ts'
 import type { Annotation } from './components/Reading.tsx'
@@ -15,8 +17,13 @@ import { loadAttempts, saveAttempts, type Attempt } from './lib/practice.ts'
 import { clearClips, deleteClip } from './lib/clips.ts'
 import { usePracticeState } from './lib/usePracticeState.ts'
 import { SplitLab } from './components/SplitLab.tsx'
+import { useVoicePreferences } from './lib/useVoicePreferences.ts'
+import { isExcluded, loadVoicePreferences } from './lib/voicePreferences.ts'
 
 const VOICE_KEY = 'phonetics-lab:voice'
+// Apply the new default once; later explicit choices still persist normally.
+const VOICE_POLICY_KEY = 'phonetics-lab:voice-policy'
+const VOICE_POLICY = 'brian-default-v1'
 
 function readStored(key: string): string | null {
   try {
@@ -46,13 +53,15 @@ export default function App() {
   const [rate, setRate] = useState(1)
 
   // Default view is Practice (Speaking Studio)
-  const [view, setView] = useState<'practice' | 'lookup' | 'vowels'>('practice')
+  const [view, setView] = useState<'practice' | 'daily' | 'lookup' | 'vowels'>('practice')
 
   const [drillSound, setDrillSound] = useState<string | null>(null)
   const [attempts, setAttempts] = useState<Attempt[]>(() => loadAttempts())
   const [voices, setVoices] = useState<Voice[]>([])
   const [voiceURI, setVoiceURI] = useState('')
   const [readingAloud, setReadingAloud] = useState(false)
+  const [voicePreferences] = useVoicePreferences()
+  const voiceAllowed = voices.some((voice) => voice.uri === voiceURI && !isExcluded(voice, voicePreferences))
 
   useEffect(() => {
     loadDictionary(({ loaded, total }) => setProgress(total ? loaded / total : 0))
@@ -63,11 +72,17 @@ export default function App() {
   useEffect(() => {
     return onVoicesReady((available) => {
       setVoices(available)
-      setVoiceURI((current) => {
-        if (current && available.some((v) => v.uri === current)) return current
-        const saved = readStored(VOICE_KEY)
-        if (saved && available.some((v) => v.uri === saved)) return saved
-        return available[0]?.uri ?? ''
+      setVoiceURI(() => {
+        const preferences = loadVoicePreferences()
+        const allowed = available.filter((voice) => !isExcluded(voice, preferences))
+        const saved = readStored(VOICE_POLICY_KEY) === VOICE_POLICY ? readStored(VOICE_KEY) : null
+        if (saved && allowed.some((v) => v.uri === saved)) return saved
+        const preferred = defaultVoice(allowed)
+        if (preferred && isBrianVoice(preferred) && !saved) {
+          writeStored(VOICE_KEY, preferred.uri)
+          writeStored(VOICE_POLICY_KEY, VOICE_POLICY)
+        }
+        return preferred?.uri ?? ''
       })
     })
   }, [])
@@ -85,20 +100,28 @@ export default function App() {
   const chooseVoice = useCallback((uri: string) => {
     setVoiceURI(uri)
     writeStored(VOICE_KEY, uri)
+    writeStored(VOICE_POLICY_KEY, VOICE_POLICY)
   }, [])
+
+  useEffect(() => {
+    const selected = voices.find((voice) => voice.uri === voiceURI)
+    if ((selected && isExcluded(selected, voicePreferences)) || (!voiceURI && voices.length)) {
+      chooseVoice(defaultVoice(voices.filter((voice) => !isExcluded(voice, voicePreferences)))?.uri ?? '')
+    }
+  }, [voicePreferences, voices, voiceURI, chooseVoice])
 
   const analysis = useMemo(() => (dict ? analyze(text, dict) : null), [text, dict])
 
   const say = useCallback(
     (word: string) => {
-      pronounce(word, { preferRecording, rate, voiceURI })
+      if (voiceAllowed) pronounce(word, { preferRecording, rate, voiceURI })
     },
-    [preferRecording, rate, voiceURI],
+    [preferRecording, rate, voiceURI, voiceAllowed],
   )
 
   const previewVoice = useCallback(() => {
-    synthesise('The quick brown fox jumps over the lazy dog.', { rate, voiceURI })
-  }, [rate, voiceURI])
+    if (voiceAllowed) synthesise('The quick brown fox jumps over the lazy dog.', { rate, voiceURI })
+  }, [rate, voiceURI, voiceAllowed])
 
   const toggleReadAloud = useCallback(() => {
     if (readingAloud) {
@@ -106,9 +129,10 @@ export default function App() {
       setReadingAloud(false)
       return
     }
+    if (!voiceAllowed) return
     setReadingAloud(true)
     synthesise(text, { rate, voiceURI, onEnd: () => setReadingAloud(false) })
-  }, [readingAloud, text, rate, voiceURI])
+  }, [readingAloud, text, rate, voiceURI, voiceAllowed])
 
   const recordAttempt = useCallback((attempt: Attempt, replaceAt?: number) => {
     setAttempts((previous) => {
@@ -155,7 +179,10 @@ export default function App() {
     onReplaceAttempts: replaceAttempts,
     onClearHistory: clearHistory,
     onDeleteAttempt: deleteAttempt,
-    onSpeak: (phrase, onEnd) => synthesise(phrase, { rate, voiceURI, onEnd }),
+    onSpeak: (phrase, onEnd, onError) => {
+      if (!voiceAllowed) { onError?.('No allowed voice is available. Restore a speaker in voice settings.'); return }
+      synthesise(phrase, { rate, voiceURI, onEnd, onError })
+    },
   })
 
   return (

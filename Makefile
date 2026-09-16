@@ -9,8 +9,8 @@
 # it answers, falling back to the in-browser recogniser when it does not, so
 # `make web` on its own is a complete app — just a less accurate one.
 #
-# Nothing here talks to the network at runtime. The API binds to 127.0.0.1 and
-# recordings are scored on this machine.
+# The API binds to 127.0.0.1 and recordings are scored on this machine.
+# Optional free online reference voices send only reference text to Edge TTS.
 
 UV  ?= uv
 NPM ?= npm
@@ -70,6 +70,7 @@ check-web:
 
 check-api:
 	$(UV) run --directory backend python -m app.cli check
+	$(UV) run --directory backend python -m unittest test_voice
 
 ## Build and teardown ---------------------------------------------------------
 
