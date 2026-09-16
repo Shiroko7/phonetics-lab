@@ -72,7 +72,7 @@ export function usePracticeState({
   text, dict, display, attempts, drill, onDrillStarted,
   onAttempt, onReplaceAttempts, onClearHistory, onDeleteAttempt, onSpeak,
 }: PracticeProps) {
-  const [mode, setMode] = useState<Mode>('scripted')
+  const [mode, setMode] = useState<Mode>('free')
   const [target, setTarget] = useState('')
   const [phase, setPhase] = useState<Phase>('idle')
   const [load, setLoad] = useState<LoadState>({ stage: 'idle', progress: 0 })
