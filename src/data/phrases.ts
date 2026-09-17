@@ -22,6 +22,8 @@
  * never appear in a target and need no drills of their own.
  */
 
+import { FANTASY_DRILL_PHRASES } from './fantasyContent.ts'
+
 export interface CuratedPhrase {
   /** The line to say. Ordinary English, ordinary punctuation. */
   text: string
@@ -545,4 +547,5 @@ export const PHRASE_BANK: CuratedPhrase[] = [
   { text: 'Get cold cabbage from green garden.', focus: ['k', 'ɡ'], pair: ['k', 'ɡ'] },
   { text: 'Greg kept clean green cups close.', focus: ['k', 'ɡ'], pair: ['k', 'ɡ'] },
   { text: 'He had a hat and an apple.', focus: ['h'], pair: ['h', 'ə'] },
+  ...FANTASY_DRILL_PHRASES,
 ]

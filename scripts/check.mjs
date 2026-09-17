@@ -549,6 +549,10 @@ group('phrase library is large and randomized across sessions', () => {
   const bank = indexPhrases(dict, PHRASE_BANK)
   check('library has a large bank of phrases', bank.length >= 200, true)
 
+  const normalizedLine = (text) => text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  const allContentLines = [...PHRASE_BANK.map((phrase) => phrase.text), ...DAILY_TRAINING_SENTENCES, ...DAILY_TRANSFER_SENTENCES]
+  check('content lines are unique', new Set(allContentLines.map(normalizedLine)).size, allContentLines.length)
+
   const drillable = Object.keys(PHONES).filter((p) => p !== 'ɾ' && p !== 'ʔ')
   const undercovered = drillable.filter((p) => bank.filter((one) => one.focus.includes(p)).length < 5)
   check('every drillable sound has at least 5 lines of its own', undercovered.join(' '), '')

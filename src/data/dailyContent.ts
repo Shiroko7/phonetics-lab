@@ -1,3 +1,8 @@
+import {
+  FANTASY_DAILY_TRAINING_SENTENCES,
+  FANTASY_DAILY_TRANSFER_SENTENCES,
+} from './fantasyContent.ts'
+
 /** Original sentences, written for connected speech. No book excerpts. */
 export interface ListeningContrast {
   words: [string, string]
@@ -95,6 +100,7 @@ export const DAILY_TRAINING_SENTENCES = [
   'Researchers compared the results before publishing their conclusions.',
   'The town restored the library after residents raised enough money.',
   'The interview revealed a detail that the earlier account had missed.',
+  ...FANTASY_DAILY_TRAINING_SENTENCES,
 ]
 
 // Held out from the ordinary phrase bank and Daily rehearsal. A seen sentence
@@ -152,6 +158,7 @@ export const DAILY_TRANSFER_SENTENCES = [
   'A recent survey suggested that residents wanted more public gardens.',
   'The committee postponed its decision until the evidence was available.',
   'Our guide explained how the ancient city collected drinking water.',
+  ...FANTASY_DAILY_TRANSFER_SENTENCES,
 ]
 
 /** Grammatically independent clauses give the reserve additional contexts. */
