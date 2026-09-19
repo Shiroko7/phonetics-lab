@@ -9,7 +9,7 @@ import {
 } from '../lib/daily.ts'
 import {
   advanceRoutine, changeRoutineVoice, exposeRoutineStep, markReferenceHeard, planDailyRoutine, refreshLegacyContexts, refreshRoutineVoices,
-  recordRoutineEvent, referenceVoicePool, routineSummary, updateRoutine,
+  recordRoutineEvent, referenceVoicePool, refreshRoutineSentences, routineSummary, updateRoutine,
   type RoutineEvent, type RoutineKind,
 } from '../lib/dailyRoutine.ts'
 import { listVoices, onVoicesReady, stop, synthesise, type Voice } from '../lib/speech.ts'
@@ -19,6 +19,8 @@ import type { PracticeState } from '../lib/usePracticeState.ts'
 import { AudioTransport } from './shared/AudioTransport.tsx'
 import { WordDiagnostics } from './shared/WordDiagnostics.tsx'
 import { VoiceLibrary } from './shared/VoiceLibrary.tsx'
+import { DailySentenceEditor } from './shared/DailySentenceEditor.tsx'
+import { changeDailySentence } from '../lib/dailySentences.ts'
 
 interface Props { practice: PracticeState; dict: Dictionary }
 const STAGES: Record<RoutineKind, { title: string; instruction: string }> = {
@@ -59,6 +61,8 @@ export function DailyPractice({ practice, dict }: Props) {
   const [voices, setVoices] = useState<Voice[]>(listVoices)
   const [voicePreferences, updateVoicePreferences] = useVoicePreferences()
   const [showVoices, setShowVoices] = useState(false)
+  const [editingSentence, setEditingSentence] = useState(false)
+  const [showBlacklist, setShowBlacklist] = useState(false)
   const [speaking, setSpeaking] = useState(false)
   const [audioError, setAudioError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
@@ -104,6 +108,11 @@ export function DailyPractice({ practice, dict }: Props) {
   const sourceTexts = [...practice.sentences, ...practice.attempts.map((attempt) => attempt.target),
     ...practice.struggles.flatMap((word) => word.contexts ?? [])]
   const sourceSignature = JSON.stringify(sourceTexts)
+  const blacklisted = (daily.sentencePreferences ?? []).filter((entry) => entry.blocked)
+
+  useEffect(() => {
+    if (!working) mutate((state) => refreshRoutineSentences(state, dict))
+  }, [daily.sentencePreferences, session?.id, working, dict, mutate])
 
   // Upgrade pending legacy exercises in place; recorded answers and reviews survive.
   useEffect(() => {
@@ -131,6 +140,7 @@ export function DailyPractice({ practice, dict }: Props) {
     loadedStep.current = step.id
     recordingStep.current = null
     setShowVoices(false)
+    setEditingSentence(false)
     setAudioError(null)
     practice.setLine(step.kind === 'listening' ? '' : step.prompt)
     mutate((state) => exposeRoutineStep(state, session.id, Date.now(), sourceTexts))
@@ -193,6 +203,7 @@ export function DailyPractice({ practice, dict }: Props) {
   }
   const pause = () => {
     silence()
+    setEditingSentence(false)
     setSessionId(null)
     loadedStep.current = null
     setMessage('Paused. Your exercises, first answers, and place are saved.')
@@ -230,6 +241,26 @@ export function DailyPractice({ practice, dict }: Props) {
     })
   }
   const manageVoices = () => { silence(); setShowVoices((open) => !open) }
+  const saveSentences = (changes: { original: string; text: string }[]) => {
+    silence()
+    recordingStep.current = null
+    mutate((state) => refreshRoutineSentences({ ...state, sentencePreferences: changes.reduce(
+      (preferences, change) => changeDailySentence(preferences, change.original, { text: change.text }), state.sentencePreferences ?? [],
+    ) }, dict))
+    setEditingSentence(false)
+    if (changes.length) setMessage('Sentence saved. Daily Practice will use your correction in future sessions.')
+  }
+  const blacklistSentences = () => {
+    if (!step) return
+    silence()
+    recordingStep.current = null
+    const texts = step.options ?? [step.prompt]
+    mutate((state) => refreshRoutineSentences({ ...state, sentencePreferences: texts.reduce(
+      (preferences, text) => changeDailySentence(preferences, text, { blocked: true }), state.sentencePreferences ?? [],
+    ) }, dict))
+    setEditingSentence(false)
+    setMessage(`${texts.length === 1 ? 'Sentence blacklisted. It' : 'Sentences blacklisted. They'} will no longer appear in Daily Practice. You can restore ${texts.length === 1 ? 'it' : 'them'} in Blacklisted sentences.`)
+  }
   const summary = routineSummary(daily.sessions, today)
   const outcome = scoredHere && currentCard ? automaticDailyOutcome(currentCard.focusPhones, practice.aligned, practice.score, practice.report) : null
   const historyDates = [...new Set([today, ...daily.sessions.map((item) => item.dateKey),
@@ -242,12 +273,22 @@ export function DailyPractice({ practice, dict }: Props) {
         <div><span className="daily-eyebrow">Listen · speak · carry it forward</span><h1>Daily Practice</h1>
           <p>Train your ear with different voices, practise in connected speech, and check what carries into an unfamiliar sentence.</p></div>
         <div className="daily-hero-actions">
+          <button className="ghost" aria-expanded={showBlacklist} onClick={() => setShowBlacklist((open) => !open)}>Blacklisted sentences ({blacklisted.length})</button>
           {session ? <button className="ghost" onClick={pause} disabled={working}>Pause session</button>
             : <button className="primary" onClick={begin}>{findOpenSession(daily) ? 'Resume session' : 'Start today'}</button>}
           {routine && <span className="daily-progress-pill">{routine.cursor + 1} / {routine.steps.length}</span>}
         </div>
       </section>
       {message && <div className="daily-message" role="status">{message}</div>}
+      {showBlacklist && <section className="daily-history-card daily-blacklist" aria-label="Blacklisted sentences">
+        <h2>Blacklisted sentences</h2>
+        <p className="daily-help">These sentences stay out of Daily Practice, including when they appear in past attempts. Changes are saved in this browser.</p>
+        {blacklisted.length ? <ul>{blacklisted.map((entry) => <li key={entry.text}><p>{entry.text}</p>
+          <button className="ghost small" disabled={working} onClick={() => {
+            mutate((state) => ({ ...state, sentencePreferences: changeDailySentence(state.sentencePreferences, entry.text, { blocked: false }) }))
+            setMessage('Sentence restored. It can appear in future Daily Practice sessions.')
+          }}>Restore sentence</button></li>)}</ul> : <p>No blacklisted sentences.</p>}
+      </section>}
       {session && step && currentCard ? <>
         <nav className="daily-stage-strip" aria-label="Practice stages">
           {(['recall', 'listening', 'production', 'transfer'] as RoutineKind[]).filter((kind) => routine?.steps.some((item) => item.kind === kind)).map((kind) => (
@@ -256,7 +297,7 @@ export function DailyPractice({ practice, dict }: Props) {
         <section className="daily-review-card">
           <header className="daily-card-navigation">
             <div className="daily-review-meta"><span>{STAGES[step.kind].title}</span><span>{currentCard.label}</span></div>
-            <button className="primary" onClick={next} disabled={working}>{firstEvent ? 'Next card' : 'Skip this card'}</button>
+            <button className="primary" onClick={next} disabled={working || editingSentence}>{firstEvent ? 'Next card' : 'Skip this card'}</button>
           </header>
           <h2 className="daily-exercise-heading">{STAGES[step.kind].title}</h2>
           <p className="daily-instruction">{STAGES[step.kind].instruction}</p>
@@ -278,7 +319,13 @@ export function DailyPractice({ practice, dict }: Props) {
           </div>
           {showVoices && !working && <VoiceLibrary voices={voices} preferences={voicePreferences} selectedURI={voiceURI}
             onPreferences={(change) => { silence(); updateVoicePreferences(change) }} onClose={() => setShowVoices(false)} />}
-          {step.kind === 'listening' ? <div className="daily-listening">
+          <div className="daily-sentence-actions">
+            <button className="ghost small" disabled={working || editingSentence} onClick={() => { silence(); setEditingSentence(true) }}>Edit sentence{step.options ? 's' : ''}</button>
+            <button className="ghost small" disabled={working} onClick={blacklistSentences}>Blacklist sentence{step.options ? 's' : ''}</button>
+            <span className="daily-help">Blacklisted sentences won’t appear again.</span>
+          </div>
+          {editingSentence ? <DailySentenceEditor key={step.id} step={step} card={currentCard} dict={dict}
+            onSave={saveSentences} onCancel={() => setEditingSentence(false)} /> : step.kind === 'listening' ? <div className="daily-listening">
             <button className="listen-ref-btn" onClick={() => playReference()} disabled={!voiceURI}>{speaking ? '■ Stop' : step.referenceHeard ? '♪ Listen again' : '♪ Play sentence'}</button>
             <div className="daily-listening-options" role="group" aria-label="Which sentence did you hear?">
               {step.options?.map((option, index) => <button key={option}
@@ -309,7 +356,7 @@ export function DailyPractice({ practice, dict }: Props) {
           {audioError && <div className="transport-error-banner" role="alert">{audioError}</div>}
           {!voicePool.length && <p className="daily-help">No allowed voice is available. Restore a voice in Manage voices, or skip listening and continue recording. Skips do not count as incorrect answers.</p>}
           <div className="daily-step-actions">
-            {step.kind !== 'listening' && lastEvent && <button className="ghost" onClick={record} disabled={working}>Record again</button>}
+            {step.kind !== 'listening' && lastEvent && <button className="ghost" onClick={record} disabled={working || editingSentence}>Record again</button>}
             <span>{stepEvents.length > 1 ? `${stepEvents.length} takes saved` : 'Repeat as much as you find useful.'}</span>
           </div>
         </section>

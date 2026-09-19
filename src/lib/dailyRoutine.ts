@@ -9,6 +9,7 @@ import type { Dictionary } from './dict.ts'
 import { flatten, targetWords } from './report.ts'
 import type { Voice } from './speech.ts'
 import { allowedDailyVoices, type VoicePreferences } from './voicePreferences.ts'
+import { dailySentences, resolveDailySentence, sentenceKey as key } from './dailySentences.ts'
 
 export type RoutineKind = 'listening' | 'production' | 'transfer' | 'recall'
 export interface DailyPreferences {
@@ -61,7 +62,6 @@ export interface DailyRoutine {
   notices: string[]
 }
 
-const key = (text: string) => text.toLowerCase().replace(/[^a-z0-9']+/g, ' ').trim()
 const sample = <T,>(items: T[], random: () => number): T | undefined => items[Math.min(items.length - 1, Math.floor(random() * items.length))]
 const shuffle = <T,>(items: T[], random: () => number): T[] => {
   const result = [...items]
@@ -123,6 +123,15 @@ export function contrastsForCard(card: DailyCard, dict: Dictionary) {
   }).sort((a, b) => Number(b.exact) - Number(a.exact))
 }
 
+/** An edited listening trial must still differ by its original sound contrast. */
+export function validListeningOptions(options: [string, string], pair: [string, string] | undefined, dict: Dictionary): boolean {
+  if (!pair || options.some((text) => !isPracticeContext(text, dict))) return false
+  const [a, b] = options.map((text) => flatten(targetWords(text, dict)))
+  if (a.length !== b.length) return false
+  const changed = a.flatMap((phone, index) => phone === b[index] ? [] : [[phone, b[index]]])
+  return changed.length === 1 && pair.every((phone) => changed[0].includes(phone))
+}
+
 export function exposedPrompts(state: DailyState, attemptTexts: string[] = []): Set<string> {
   return new Set([
     ...contextSentences(attemptTexts),
@@ -130,6 +139,7 @@ export function exposedPrompts(state: DailyState, attemptTexts: string[] = []): 
     ...state.cards.flatMap((card) => [card.lastPrompt ?? '', ...(card.promptHistory ?? [])]),
     ...state.sessions.flatMap((session) => session.routine?.steps
       .filter((step) => step.exposedAt).flatMap((step) => step.options ?? [step.prompt]) ?? []),
+    ...(state.sentencePreferences ?? []).flatMap((entry) => [entry.text, ...entry.originals]),
   ].filter(Boolean).map(key))
 }
 
@@ -146,6 +156,7 @@ export function planDailyRoutine(
   const transfers: RoutineStep[] = []
   const notices: string[] = []
   const pool = shuffle(voices, random)
+  const preferences = state.sentencePreferences
   let serial = 0
   const add = (card: DailyCard, kind: RoutineKind, prompt: string, extra: Partial<RoutineStep> = {}): RoutineStep => ({
     id: `${session.id}:step:${serial++}`, cardId: card.id, kind, prompt,
@@ -154,12 +165,20 @@ export function planDailyRoutine(
   for (const cardId of session.queue.slice(session.index)) {
     const card = state.cards.find((item) => item.id === cardId)
     if (!card) continue
-    if (card.lastPrompt && sentenceFitsCard(card.lastPrompt, card, dict)
+    const recall = card.lastPrompt ? resolveDailySentence(card.lastPrompt, preferences) : null
+    if (recall && sentenceFitsCard(recall, card, dict)
       && card.lastReviewedAt && localDateKey(card.lastReviewedAt) !== session.dateKey) {
-      recalls.push(add(card, 'recall', card.lastPrompt))
-      reserved.add(key(card.lastPrompt))
+      recalls.push(add(card, 'recall', recall))
+      reserved.add(key(recall))
     }
-    const contrasts = contrastsForCard(card, dict)
+    const contrasts = contrastsForCard(card, dict).flatMap((contrast) => {
+      const frames = contrast.frames.flatMap((frame) => {
+        const options = contrast.words.map((word) => resolveDailySentence(frame.replace('{word}', word), preferences))
+        return options.every((text) => text !== null) && validListeningOptions(options as [string, string], contrast.pair, dict)
+          ? [options as [string, string]] : []
+      })
+      return frames.length ? [{ ...contrast, frames }] : []
+    })
     const exact = contrasts.filter((contrast) => contrast.exact)
     const candidates = exact.length ? exact : contrasts
     const shuffled = shuffle(candidates, random)
@@ -167,20 +186,21 @@ export function planDailyRoutine(
     for (let i = 0; i < 2 && shuffled.length; i++) {
       const contrast = shuffled[i % shuffled.length]
       const frame = contrast.frames[i % contrast.frames.length]
-      const options = shuffle(contrast.words.map((word) => frame.replace('{word}', word)), random) as [string, string]
+      const options = shuffle(frame, random) as [string, string]
       const answer = answerOrder[i]
       const step = add(card, 'listening', options[answer], { options, answer, pair: contrast.pair })
       listening.push(step)
       options.forEach((text) => reserved.add(key(text)))
     }
     if (!shuffled.length) notices.push(`${card.label}: no checked listening contrast is available yet; speech practice is included.`)
-    const training = contextSentences([
+    const training = dailySentences([
       ...DAILY_TRAINING_SENTENCES,
+      ...(preferences ?? []).map((entry) => entry.text),
       ...attemptTexts,
       ...state.reviews.map((review) => review.prompt),
       ...(card.promptHistory ?? []),
-    ]).filter((text) => sentenceFitsCard(text, card, dict))
-    const recent = new Set((card.promptHistory ?? []).map(key))
+    ], preferences).filter((text) => sentenceFitsCard(text, card, dict))
+    const recent = new Set(dailySentences(card.promptHistory ?? [], preferences).map(key))
     const usedHere = new Set<string>()
     for (let i = 0; i < 2; i++) {
       const available = training.filter((text) => !usedHere.has(key(text)))
@@ -194,10 +214,10 @@ export function planDailyRoutine(
       usedHere.add(key(chosen))
     }
     if (usedHere.size < 2) notices.push(`${card.label}: ${usedHere.size ? 'only one meaningful practice sentence is' : 'no meaningful practice sentences are'} available. Add a full sentence containing this target in Practice Studio to expand its contexts.`)
-    const reserve = [
+    const reserve = dailySentences([
       ...DAILY_TRANSFER_SENTENCES,
       ...TRANSFER_SUBJECTS.flatMap((subject) => TRANSFER_ACTIONS.map((action) => `${subject} ${action}.`)),
-    ].filter((text) => !reserved.has(key(text)) && sentenceFitsCard(text, card, dict))
+    ], preferences).filter((text) => !reserved.has(key(text)) && sentenceFitsCard(text, card, dict))
     // Prefer fully authored sentences before using grammatical combinations.
     const authored = reserve.filter((text) => DAILY_TRANSFER_SENTENCES.includes(text))
     const chosen = sample(authored.length ? authored : reserve, random)
@@ -242,6 +262,43 @@ export function refreshLegacyContexts(
 
 export function updateRoutine(state: DailyState, sessionId: string, routine: DailyRoutine): DailyState {
   return { ...state, sessions: state.sessions.map((session) => session.id === sessionId ? { ...session, routine } : session) }
+}
+
+/** Apply changes to saved, unfinished sessions without rewriting recorded evidence. */
+export function refreshRoutineSentences(state: DailyState, dict: Dictionary, now = Date.now()): DailyState {
+  let changed = false
+  const finished: { sessionId: string; cardId: string }[] = []
+  const sessions = state.sessions.map((session) => {
+    const routine = session.routine
+    if (session.endedAt || !routine) return session
+    let revised = false
+    const steps = routine.steps.flatMap((step, index): RoutineStep[] => {
+      if (index < routine.cursor) return [step]
+      const texts = step.options ?? [step.prompt]
+      const resolved = texts.map((text) => resolveDailySentence(text, state.sentencePreferences))
+      if (resolved.every((text, i) => text === texts[i])) return [step]
+      revised = true
+      if (resolved.some((text) => text === null)) return []
+      const options = step.options ? resolved as [string, string] : undefined
+      const prompt = options ? options[step.answer ?? 0] : resolved[0]!
+      const card = state.cards.find((item) => item.id === step.cardId)
+      if (!card || (options ? !validListeningOptions(options, step.pair, dict) : !sentenceFitsCard(prompt, card, dict))) return []
+      // Editing reveals the text; it is now rehearsal, not independent recall/transfer.
+      return [{ ...step, id: `${step.id}:edited`, prompt, options,
+        kind: step.kind === 'listening' ? 'listening' : 'production',
+        exposedAt: undefined, referenceHeard: false, fresh: false }]
+    })
+    if (!revised) return session
+    changed = true
+    const pending = new Set(steps.slice(routine.cursor).map((step) => step.cardId))
+    const removed = [...new Set(routine.steps.slice(routine.cursor).map((step) => step.cardId))]
+      .filter((cardId) => !pending.has(cardId))
+    removed.forEach((cardId) => finished.push({ sessionId: session.id, cardId }))
+    const ended = routine.cursor >= steps.length
+    return { ...session, routine: { ...routine, steps },
+      index: ended ? session.queue.length : session.index + removed.length, endedAt: ended ? now : undefined }
+  })
+  return changed ? finished.reduce((next, item) => scheduleRoutineTarget(next, item.sessionId, item.cardId, now), { ...state, sessions }) : state
 }
 
 export function exposeRoutineStep(state: DailyState, sessionId: string, now = Date.now(), attemptTexts: string[] = []): DailyState {
@@ -299,6 +356,37 @@ export function routineCardRating(events: RoutineEvent[]): ReviewRating | null {
   return ratings[Math.max(0, rating)]
 }
 
+/** Preserve earned scheduling evidence even if the remaining sentence is removed. */
+function scheduleRoutineTarget(state: DailyState, sessionId: string, cardId: string, now: number): DailyState {
+  const session = state.sessions.find((item) => item.id === sessionId)
+  const card = state.cards.find((item) => item.id === cardId)
+  if (!session?.routine || !card) return state
+  const events = session.routine.events.filter((event) => event.cardId === card.id)
+  const rating = routineCardRating(events)
+  const alreadyReviewed = state.reviews.some((review) => review.cardId === card.id && localDateKey(review.reviewedAt) === localDateKey(now))
+  if (!rating || alreadyReviewed) return state
+  const scheduled = scheduleDailyCard(card, rating, now)
+  const scored = events.filter((event) => event.first && event.status === 'scored')
+  const last = scored[scored.length - 1]
+  const id = `${session.id}:review:${card.id}`
+  return {
+    ...state,
+    cards: state.cards.map((item) => item.id === card.id ? {
+      ...card, ...scheduled, totalReviews: card.totalReviews + 1,
+      successfulReviews: card.successfulReviews + Number(rating !== 'again'),
+      lastReviewedAt: now, lastPrompt: last.prompt, lastRating: rating,
+      lastScore: last.focusScore ?? last.overallScore,
+      promptHistory: [...(card.promptHistory ?? []), ...scored.map((event) => event.prompt)].slice(-8),
+    } : item),
+    reviews: [...state.reviews, {
+      id, cardId: card.id, sessionId, reviewedAt: now, prompt: last.prompt, rating,
+      focusScore: last.focusScore, overallScore: last.overallScore, attemptAt: last.attemptAt,
+      intervalBeforeDays: card.intervalDays, intervalAfterDays: scheduled.intervalDays, dueAt: scheduled.dueAt,
+    }],
+    sessions: state.sessions.map((item) => item.id === sessionId ? { ...item, reviewIds: [...item.reviewIds, id] } : item),
+  }
+}
+
 /** Advance freely, recording skips honestly. Schedule each target once per day. */
 export function advanceRoutine(state: DailyState, sessionId: string, now = Date.now()): DailyState {
   const session = state.sessions.find((item) => item.id === sessionId)
@@ -314,32 +402,7 @@ export function advanceRoutine(state: DailyState, sessionId: string, now = Date.
   next = updateRoutine(next, sessionId, { ...current, cursor })
   const targetFinished = !current.steps.slice(cursor).some((item) => item.cardId === step.cardId)
   if (targetFinished) {
-    const card = next.cards.find((item) => item.id === step.cardId)!
-    const events = current.events.filter((event) => event.cardId === card.id)
-    const rating = routineCardRating(events)
-    const alreadyReviewed = next.reviews.some((review) => review.cardId === card.id && localDateKey(review.reviewedAt) === localDateKey(now))
-    if (rating && !alreadyReviewed) {
-      const scheduled = scheduleDailyCard(card, rating, now)
-      const scored = events.filter((event) => event.first && event.status === 'scored')
-      const last = scored[scored.length - 1]
-      const id = `${session.id}:review:${card.id}`
-      next = {
-        ...next,
-        cards: next.cards.map((item) => item.id === card.id ? {
-          ...card, ...scheduled, totalReviews: card.totalReviews + 1,
-          successfulReviews: card.successfulReviews + Number(rating !== 'again'),
-          lastReviewedAt: now, lastPrompt: last.prompt, lastRating: rating,
-          lastScore: last.focusScore ?? last.overallScore,
-          promptHistory: [...(card.promptHistory ?? []), ...scored.map((event) => event.prompt)].slice(-8),
-        } : item),
-        reviews: [...next.reviews, {
-          id, cardId: card.id, sessionId, reviewedAt: now, prompt: last.prompt, rating,
-          focusScore: last.focusScore, overallScore: last.overallScore, attemptAt: last.attemptAt,
-          intervalBeforeDays: card.intervalDays, intervalAfterDays: scheduled.intervalDays, dueAt: scheduled.dueAt,
-        }],
-        sessions: next.sessions.map((item) => item.id === sessionId ? { ...item, reviewIds: [...item.reviewIds, id] } : item),
-      }
-    }
+    next = scheduleRoutineTarget(next, sessionId, step.cardId, now)
     next = { ...next, sessions: next.sessions.map((item) => item.id === sessionId ? { ...item, index: item.index + 1 } : item) }
   }
   if (cursor >= current.steps.length) next = { ...next, sessions: next.sessions.map((item) => item.id === sessionId

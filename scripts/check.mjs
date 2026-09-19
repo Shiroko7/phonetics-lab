@@ -9,6 +9,7 @@
 import { readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isDeepStrictEqual } from 'node:util'
 import { analyze } from '../src/lib/analyze.ts'
 import { lookupWord } from '../src/lib/lookup.ts'
 import { applyFlapping, respell, transcribe } from '../src/lib/phonology.ts'
@@ -39,13 +40,14 @@ import {
 } from '../src/lib/daily.ts'
 import { automaticDailyOutcome } from '../src/lib/dailyDecision.ts'
 import {
-  advanceRoutine, changeRoutineVoice, contrastsForCard, exposeRoutineStep, markReferenceHeard, planDailyRoutine, refreshLegacyContexts, refreshRoutineVoices,
+  advanceRoutine, changeRoutineVoice, contrastsForCard, exposeRoutineStep, markReferenceHeard, planDailyRoutine, refreshLegacyContexts, refreshRoutineVoices, refreshRoutineSentences,
   recordRoutineEvent, referenceVoicePool, routineCardRating, routineSummary, sentenceFitsCard, updateRoutine,
 } from '../src/lib/dailyRoutine.ts'
 import { DAILY_TRAINING_SENTENCES, DAILY_TRANSFER_SENTENCES, LISTENING_CONTRASTS } from '../src/data/dailyContent.ts'
 import { loadDailyState, saveDailyState } from '../src/lib/daily.ts'
 import { defaultVoice, stop as stopSpeech, synthesise } from '../src/lib/speech.ts'
 import { contextsForWord, isPracticeContext, isWordCarrier } from '../src/lib/context.ts'
+import { changeDailySentence, dailySentences, resolveDailySentence, sentenceKey } from '../src/lib/dailySentences.ts'
 import { excludeVoice, isExcluded, loadVoicePreferences, saveVoicePreferences, uniqueEnglishVoices, voiceKey, VOICE_PREFERENCES_KEY } from '../src/lib/voicePreferences.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -856,6 +858,85 @@ group('word practice uses real contexts and migrates only pending carrier exerci
   check('migration cannot load stale scoring against a new prompt', refreshed.steps[1].id !== legacy.steps[1].id, true)
   state = updateRoutine(state, started.session.id, refreshed)
   check('natural plans never reroll on reload', refreshLegacyContexts(state, state.sessions[0], dict, []), undefined)
+})
+
+group('Daily corrections and blacklists survive old sources, saved sessions and reloads', () => {
+  const base = Date.parse('2026-09-15T09:00:00')
+  const original = 'The astronomer watch the comet above the valley.'
+  const corrected = 'The astronomer watched the comet above the valley.'
+  const revised = 'The astronomer watched a comet above the valley.'
+  let preferences = changeDailySentence([], original, { text: corrected })
+  preferences = changeDailySentence(preferences, corrected, { text: revised })
+  check('oldest source receives latest correction', resolveDailySentence(original, preferences), revised)
+  check('intermediate attempts receive latest correction', resolveDailySentence(corrected, preferences), revised)
+  check('paragraphs split before applying corrections and deduplication', dailySentences([`${original} ${corrected}`, revised], preferences).join('|'), revised)
+  preferences = changeDailySentence(preferences, original, { blocked: true })
+  for (const text of [original, corrected, revised.toUpperCase().replace('.', '!!!')]) {
+    check('blacklist covers every spelling and punctuation variant', resolveDailySentence(text, preferences), null)
+  }
+  preferences = changeDailySentence(preferences, original, { blocked: false })
+  check('restoring an old spelling preserves the latest correction', resolveDailySentence(original, preferences), revised)
+  let state = syncCandidates({ cards: [], reviews: [], sessions: [], sentencePreferences: preferences }, [{
+    id: 'astronomer', kind: 'word', label: 'astronomer', word: 'astronomer', focusPhones: expectedPhones(dict.get('astronomer')[0]).slice(0, 2),
+  }], base)
+  const start = startDailySession(state, 2, base)
+  const plan = planDailyRoutine(start.state, start.session, dict, [], [original, corrected], () => .3)
+  check('new production uses only the correction', plan.steps.filter((step) => step.kind === 'production').every((step) => step.prompt === revised), true)
+  check('saved correction remains available after old attempts are pruned', planDailyRoutine(start.state, start.session, dict, []).steps.some((step) => step.prompt === revised), true)
+
+  const oldStep = { id: 'now', cardId: 'astronomer', kind: 'transfer', prompt: original, referenceHeard: true, fresh: true, exposedAt: base }
+  const event = { id: 'recorded', stepId: 'now', cardId: 'astronomer', kind: 'transfer', prompt: original, status: 'scored', first: true, fresh: true, overallScore: 90, rating: 'good', at: base }
+  state = updateRoutine(start.state, start.session.id, { version: 1, steps: [{ ...oldStep, id: 'past' }, oldStep, { ...oldStep, id: 'later' }], cursor: 1, events: [event], notices: [] })
+  state = refreshRoutineSentences(state, dict, base + 1)
+  check('completed sentence is not rewritten', state.sessions[0].routine.steps[0].prompt, original)
+  check('current and queued sentences are corrected', state.sessions[0].routine.steps.slice(1).every((step) => step.prompt === revised), true)
+  check('correction invalidates old scoring and heard reference', state.sessions[0].routine.steps[1].id !== oldStep.id && !state.sessions[0].routine.steps[1].referenceHeard, true)
+  check('edited transfer becomes rehearsal', state.sessions[0].routine.steps[1].kind, 'production')
+  check('recorded result retains its original text and score', JSON.stringify(state.sessions[0].routine.events), JSON.stringify([event]))
+  check('reconciliation cannot reroll corrected sessions', refreshRoutineSentences(state, dict), state)
+  state = { ...state, sentencePreferences: changeDailySentence(state.sentencePreferences, corrected, { blocked: true }) }
+  state = refreshRoutineSentences(state, dict, base + 2)
+  check('all pending occurrences are removed together', state.sessions[0].routine.steps.length, 1)
+  check('removing the last pending sentence closes the saved session', !!state.sessions[0].endedAt, true)
+  check('blacklisting preserves earned review scheduling', state.reviews.length, 1)
+  check('blacklisting does not create a failure or skip result', state.sessions[0].routine.events.length, 1)
+  const next = startDailySession(state, 2, state.cards[0].dueAt + 86400000)
+  const nextPlan = planDailyRoutine(next.state, next.session, dict, [], [original, corrected, revised])
+  check('old attempts, prompt history and recall cannot resurrect a blacklist', nextPlan.steps.every((step) => ![original, corrected, revised].includes(step.prompt)), true)
+
+  const storage = new Map()
+  const priorStorage = globalThis.localStorage
+  try {
+    globalThis.localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) }
+    saveDailyState(state)
+    const restored = loadDailyState()
+    check('corrections, aliases and blacklist survive reload', isDeepStrictEqual(restored.sentencePreferences, state.sentencePreferences), true)
+    check('reload still excludes the original typo', resolveDailySentence(original, restored.sentencePreferences), null)
+    storage.set('phonetics-lab:daily', JSON.stringify({ cards: [], reviews: [], sessions: [], sentencePreferences: [null, { text: 3 }, { text: 'bad', originals: null }] }))
+    check('malformed sentence preferences are ignored safely', loadDailyState().sentencePreferences.length, 0)
+    storage.set('phonetics-lab:daily', JSON.stringify({ cards: [], reviews: [], sessions: [] }))
+    check('legacy state loads without sentence preferences', loadDailyState().sentencePreferences.length, 0)
+  } finally { globalThis.localStorage = priorStorage }
+
+  const sounds = syncCandidates({ cards: [], reviews: [], sessions: [] }, [{ id: 'theta', kind: 'sound', label: 'theta', focusPhones: ['θ'] }], base)
+  const soundStart = startDailySession(sounds, 2, base)
+  const soundPlan = planDailyRoutine(soundStart.state, soundStart.session, dict, [], [], () => .3)
+  const listening = soundPlan.steps.find((step) => step.kind === 'listening')
+  const distractor = listening.options[1 - listening.answer]
+  let blocked = { ...soundStart.state, sentencePreferences: changeDailySentence([], distractor, { blocked: true }) }
+  blocked = updateRoutine(blocked, soundStart.session.id, soundPlan)
+  blocked = refreshRoutineSentences(blocked, dict, base)
+  check('blacklisting a distractor removes the entire listening trial', !blocked.sessions[0].routine.steps.some((step) => step.options?.includes(distractor)), true)
+  const replanned = planDailyRoutine(blocked, soundStart.session, dict, [], [], () => .3)
+  check('blacklisted listening options never return in a new plan', !replanned.steps.some((step) => (step.options ?? [step.prompt]).some((text) => sentenceKey(text) === sentenceKey(distractor))), true)
+  const listeningEdits = listening.options.reduce((prefs, text) => changeDailySentence(prefs, text, { text: text.replace(/[.!?]$/, ' today.') }), [])
+  const edited = refreshRoutineSentences(updateRoutine({ ...soundStart.state, sentencePreferences: listeningEdits }, soundStart.session.id, soundPlan), dict, base)
+  const trial = edited.sessions[0].routine.steps.find((step) => step.id === `${listening.id}:edited`)
+  check('editing both listening options preserves the answer position', trial?.prompt, trial?.options[trial?.answer])
+  check('edited listening requires a new complete reference', trial?.referenceHeard, false)
+  const allBlocked = soundPlan.steps.reduce((prefs, step) => (step.options ?? [step.prompt]).reduce((current, text) => changeDailySentence(current, text, { blocked: true }), prefs), [])
+  const alternate = planDailyRoutine({ ...soundStart.state, sentencePreferences: allBlocked }, soundStart.session, dict, [], [], () => .3)
+  check('authored production, listening and transfer all honor exclusions', alternate.steps.every((step) => (step.options ?? [step.prompt]).every((text) => resolveDailySentence(text, allBlocked) !== null)), true)
 })
 
 group('Daily preserves first responses and schedules only independent evidence', () => {

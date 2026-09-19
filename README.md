@@ -192,6 +192,14 @@ real context, the app reports the gap and asks for a sentence in Studio. Pending
 carrier exercises are refreshed without rewriting recorded prompts, answers, or scores.
 History is local to this browser and is removed if site data is cleared.
 
+Use **Edit sentence** on a Daily card to correct transcription mistakes. Corrections apply to
+pending exercises and future sessions, including sentences reused from old attempts. Past
+recordings and scores retain their original text. Edited recall or transfer sentences become
+ordinary practice. For listening exercises, edit both alternatives while keeping their sound contrast.
+**Blacklist sentence** removes a sentence from pending and future Daily exercises; listening
+cards blacklist both alternatives. Open **Blacklisted sentences** to restore an excluded sentence.
+Corrections and exclusions are saved in this browser alongside Daily history.
+
 Daily uses the allowed voice pool, replacing the earlier Brian-only/checkbox selection.
 Other English accents can be enabled. These are **synthetic references**, not recordings of human
 participants. With fewer than two voices, the app explains the missing voice variability. When a

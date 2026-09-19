@@ -8,6 +8,7 @@
  */
 
 import type { DailyRoutine, DailyPreferences } from './dailyRoutine.ts'
+import { normalizeSentencePreferences, type SentencePreference } from './dailySentences.ts'
 
 export type CardKind = 'sound' | 'word'
 export type CardState = 'new' | 'learning' | 'review' | 'relearning' | 'suspended'
@@ -69,6 +70,7 @@ export interface DailyState {
   reviews: ReviewEvent[]
   sessions: DailySession[]
   preferences?: DailyPreferences
+  sentencePreferences?: SentencePreference[]
 }
 
 export interface CardCandidate {
@@ -158,7 +160,7 @@ function normalizeState(value: unknown): DailyState {
       ? raw.preferences.voiceURIs.filter((uri): uri is string => typeof uri === 'string') : [],
     goal: [2, 4, 6].includes(raw.preferences.goal) ? raw.preferences.goal : 4,
   } : undefined
-  return { cards, reviews, sessions, preferences }
+  return { cards, reviews, sessions, preferences, sentencePreferences: normalizeSentencePreferences(raw.sentencePreferences) }
 }
 
 export function loadDailyState(): DailyState {

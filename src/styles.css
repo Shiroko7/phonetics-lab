@@ -3094,6 +3094,17 @@ button.recording {
 .daily-session-detail small { color: var(--ink-faint); overflow-wrap: anywhere; }
 .daily-setup h2 { font-size: 20px; margin: 0; }
 .daily-review-card { min-width: 0; }
+.daily-sentence-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 18px 0; }
+.daily-sentence-actions .daily-help { margin: 0; }
+.daily-sentence-editor { margin: 18px 0; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg-panel); }
+.daily-sentence-editor > p { font-size: 13px; line-height: 1.6; color: var(--ink-soft); }
+.daily-sentence-editor label { display: block; margin-top: 14px; font-size: 13px; font-weight: 600; }
+.daily-sentence-editor textarea { display: block; box-sizing: border-box; width: 100%; margin-top: 7px; padding: 12px; resize: vertical; font: inherit; font-weight: 400; line-height: 1.6; color: var(--ink); background: var(--bg-panel); border: 1px solid var(--line); border-radius: 8px; }
+.daily-sentence-editor textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.daily-blacklist h2 { margin-top: 0; font-size: 19px; }
+.daily-blacklist ul { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+.daily-blacklist li { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.daily-blacklist li p { flex: 1 1 240px; min-width: 0; overflow-wrap: anywhere; margin: 0; font-size: 14px; line-height: 1.6; }
 .daily-auto-result { flex-wrap: wrap; }
 
 .daily-hero {
