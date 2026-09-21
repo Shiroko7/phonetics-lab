@@ -49,6 +49,7 @@ import { defaultVoice, stop as stopSpeech, synthesise } from '../src/lib/speech.
 import { contextsForWord, isPracticeContext, isWordCarrier } from '../src/lib/context.ts'
 import { changeDailySentence, dailySentences, resolveDailySentence, sentenceKey } from '../src/lib/dailySentences.ts'
 import { excludeVoice, isExcluded, loadVoicePreferences, saveVoicePreferences, uniqueEnglishVoices, voiceKey, VOICE_PREFERENCES_KEY } from '../src/lib/voicePreferences.ts'
+import { analyzeStats, exportStatsReport } from '../src/lib/analytics.ts'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -1043,6 +1044,185 @@ await group('online reference cancellation and errors never count as heard audio
     globalThis.fetch = originalFetch
     globalThis.Audio = OriginalAudio
   }
+})
+
+group('pronunciation stats tracks profile, articulatory diagnostics and evolution over time', () => {
+  const baseTime = Date.parse('2026-09-20T10:00:00')
+  const laterTime = Date.parse('2026-09-21T10:00:00')
+
+  // Early attempt with /θ/ substituted with /s/
+  const attempt1 = {
+    target: 'think clearly',
+    at: baseTime,
+    durationMs: 3200,
+    score: { overall: 60, correct: 4, close: 1, wrong: 2, missing: 0, extra: 0 },
+    aligned: [
+      { expected: 'θ', actual: 's', verdict: 'wrong', distance: 0.3, expectedIndex: 0, start: 0, end: 0.1 },
+      { expected: 'ɪ', actual: 'ɪ', verdict: 'correct', distance: 0, expectedIndex: 1, start: 0.1, end: 0.2 },
+      { expected: 'ŋ', actual: 'ŋ', verdict: 'correct', distance: 0, expectedIndex: 2, start: 0.2, end: 0.3 },
+      { expected: 'k', actual: 'k', verdict: 'correct', distance: 0, expectedIndex: 3, start: 0.3, end: 0.4 },
+    ],
+  }
+
+  // Second take: /θ/ pronounced correctly!
+  const attempt2 = {
+    target: 'think clearly',
+    at: laterTime,
+    durationMs: 3000,
+    score: { overall: 95, correct: 7, close: 0, wrong: 0, missing: 0, extra: 0 },
+    aligned: [
+      { expected: 'θ', actual: 'θ', verdict: 'correct', distance: 0, expectedIndex: 0, start: 0, end: 0.1 },
+      { expected: 'ɪ', actual: 'ɪ', verdict: 'correct', distance: 0, expectedIndex: 1, start: 0.1, end: 0.2 },
+      { expected: 'ŋ', actual: 'ŋ', verdict: 'correct', distance: 0, expectedIndex: 2, start: 0.2, end: 0.3 },
+      { expected: 'k', actual: 'k', verdict: 'correct', distance: 0, expectedIndex: 3, start: 0.3, end: 0.4 },
+    ],
+  }
+
+  const wordReports = byWord(targetWords('think clearly', dict), attempt1.aligned)
+  const struggles = recordWordReports([], wordReports, baseTime, 'think clearly')
+  check('struggle bank captures firstSeen and history', struggles[0]?.history?.length, 1)
+
+  const emptyDaily = { cards: [], reviews: [], sessions: [] }
+  const stats = analyzeStats([attempt1, attempt2], struggles, emptyDaily, 'all', laterTime)
+
+  check('total attempts recorded', stats.kpis.totalAttempts, 2)
+  check('average score calculated', stats.kpis.avgScore, 78)
+  check('total speaking duration captured', stats.kpis.totalAudioDurationMs, 6200)
+  check('streak computed', stats.kpis.currentStreakDays, 2)
+
+  // Problem phonemes identification
+  const thetaStat = stats.problemPhones.find((p) => p.phone === 'θ')
+  check('theta is tracked in problem sounds', Boolean(thetaStat), true)
+  check('theta confusion records s', thetaStat?.confusions[0]?.phone, 's')
+  check('theta trend shows improvement', thetaStat?.trend, 'improving')
+
+  // Articulatory categories
+  check('manner breakdown includes fricatives', stats.articulatoryProfile.manners.some((m) => m.id === 'fricative'), true)
+  check('place breakdown includes dental', stats.articulatoryProfile.places.some((p) => p.id === 'dental'), true)
+
+  // Word evolution
+  const thinkWord = stats.troubleWords.find((w) => w.word === 'think')
+  check('trouble word has firstScore recorded', thinkWord?.firstScore, 82)
+
+  // Timeline points
+  check('timeline points count matches attempts', stats.timelinePoints.length, 2)
+  check('timeline rolling average computed', stats.timelinePoints[1]?.rollingAvg, 78)
+
+  // JSON export
+  const exported = exportStatsReport(stats)
+  check('export produces valid JSON string', exported.includes('"kpis"') && exported.includes('"problemPhonemes"'), true)
+})
+
+group('priority lists track conversational trouble words, common English usage and regressions', () => {
+  const t0 = Date.parse('2026-09-18T10:00:00')
+  const t1 = Date.parse('2026-09-19T10:00:00')
+  const t2 = Date.parse('2026-09-20T10:00:00')
+  const t3 = Date.parse('2026-09-21T10:00:00')
+
+  // Early takes where /ɹ/ in "really" was pronounced correctly
+  const take1 = {
+    target: 'really good',
+    at: t0,
+    durationMs: 2500,
+    mode: 'free',
+    score: { overall: 95, correct: 8, close: 0, wrong: 0, missing: 0, extra: 0 },
+    aligned: [
+      { expected: 'ɹ', actual: 'ɹ', verdict: 'correct', distance: 0, expectedIndex: 0, start: 0, end: 0.1 },
+      { expected: 'ɪ', actual: 'ɪ', verdict: 'correct', distance: 0, expectedIndex: 1, start: 0.1, end: 0.2 },
+      { expected: 'l', actual: 'l', verdict: 'correct', distance: 0, expectedIndex: 2, start: 0.2, end: 0.3 },
+      { expected: 'i', actual: 'i', verdict: 'correct', distance: 0, expectedIndex: 3, start: 0.3, end: 0.4 },
+      { expected: 'ɡ', actual: 'ɡ', verdict: 'correct', distance: 0, expectedIndex: 4, start: 0.4, end: 0.5 },
+      { expected: 'ʊ', actual: 'ʊ', verdict: 'correct', distance: 0, expectedIndex: 5, start: 0.5, end: 0.6 },
+      { expected: 'd', actual: 'd', verdict: 'correct', distance: 0, expectedIndex: 6, start: 0.6, end: 0.7 },
+    ],
+  }
+
+  // Later spontaneous take 2: "really" used again in free speech, but /ɹ/ was substituted with /w/ (wrong)
+  const take2 = {
+    target: 'really nice',
+    at: t1,
+    durationMs: 2800,
+    mode: 'free',
+    score: { overall: 55, correct: 5, close: 0, wrong: 2, missing: 0, extra: 0 },
+    aligned: [
+      { expected: 'ɹ', actual: 'w', verdict: 'wrong', distance: 0.4, expectedIndex: 0, start: 0, end: 0.1 },
+      { expected: 'ɪ', actual: 'ɪ', verdict: 'correct', distance: 0, expectedIndex: 1, start: 0.1, end: 0.2 },
+      { expected: 'l', actual: 'l', verdict: 'correct', distance: 0, expectedIndex: 2, start: 0.2, end: 0.3 },
+      { expected: 'i', actual: 'i', verdict: 'correct', distance: 0, expectedIndex: 3, start: 0.3, end: 0.4 },
+      { expected: 'n', actual: 'n', verdict: 'correct', distance: 0, expectedIndex: 4, start: 0.4, end: 0.5 },
+      { expected: 'aɪ', actual: 'aɪ', verdict: 'correct', distance: 0, expectedIndex: 5, start: 0.5, end: 0.6 },
+      { expected: 's', actual: 's', verdict: 'correct', distance: 0, expectedIndex: 6, start: 0.6, end: 0.7 },
+    ],
+  }
+
+  // Later spontaneous take 3: "really" used yet again in free speech with error on /ɹ/
+  const take3 = {
+    target: 'really hard',
+    at: t2,
+    durationMs: 3100,
+    mode: 'free',
+    score: { overall: 50, correct: 4, close: 0, wrong: 3, missing: 0, extra: 0 },
+    aligned: [
+      { expected: 'ɹ', actual: 'w', verdict: 'wrong', distance: 0.4, expectedIndex: 0, start: 0, end: 0.1 },
+      { expected: 'ɪ', actual: 'ɪ', verdict: 'correct', distance: 0, expectedIndex: 1, start: 0.1, end: 0.2 },
+      { expected: 'l', actual: 'l', verdict: 'correct', distance: 0, expectedIndex: 2, start: 0.2, end: 0.3 },
+      { expected: 'i', actual: 'i', verdict: 'correct', distance: 0, expectedIndex: 3, start: 0.3, end: 0.4 },
+      { expected: 'h', actual: 'h', verdict: 'correct', distance: 0, expectedIndex: 4, start: 0.4, end: 0.5 },
+      { expected: 'ɑ', actual: 'ɑ', verdict: 'correct', distance: 0, expectedIndex: 5, start: 0.5, end: 0.6 },
+      { expected: 'ɹ', actual: 'w', verdict: 'wrong', distance: 0.4, expectedIndex: 6, start: 0.6, end: 0.7 },
+      { expected: 'd', actual: 'd', verdict: 'correct', distance: 0, expectedIndex: 7, start: 0.7, end: 0.8 },
+    ],
+  }
+
+  const reports = [
+    ...byWord(targetWords('really good', dict), take1.aligned),
+    ...byWord(targetWords('really nice', dict), take2.aligned),
+    ...byWord(targetWords('really hard', dict), take3.aligned),
+  ]
+  let struggles = []
+  struggles = recordWordReports(struggles, reports.slice(0, 2), t0, 'really good')
+  struggles = recordWordReports(struggles, reports.slice(2, 4), t1, 'really nice')
+  struggles = recordWordReports(struggles, reports.slice(4, 7), t2, 'really hard')
+
+  const emptyDaily = { cards: [], reviews: [], sessions: [] }
+  const stats = analyzeStats([take1, take2, take3], struggles, emptyDaily, 'all', t3, common, dict)
+
+  // 1. Free speech priorities check
+  const topFreePriority = stats.freeSpeechPriorities[0]
+  check('free speech priority identifies really as #1 conversational trouble word', topFreePriority?.word, 'really')
+  check('free speech count captures 3 takes', topFreePriority?.freeSpeechCount, 3)
+  check('free speech error count captured', topFreePriority?.freeSpeechFailures, 2)
+  check('free speech captures spoken sentence context', (topFreePriority?.recentSentences?.length ?? 0) > 0, true)
+  check('free speech word is marked as regressing', topFreePriority?.isRegressing, true)
+
+  // 2. Regressing phonemes check (/ɹ/ dropped from 100% early to 0% late)
+  const rStat = stats.regressingPhones.find((p) => p.phone === 'ɹ')
+  check('regressing sound detected for rhotic', Boolean(rStat), true)
+  check('regressing sound specifies drop points', (rStat?.dropPoints ?? 0) >= 10, true)
+  check('regressing sound notes dominant substitution w', rStat?.dominantConfusion, 'w')
+  check('regressing sound includes articulatory advice', Boolean(rStat?.coachingAdvice), true)
+
+  // 3. Regressing trouble words check
+  const reallyRegressing = stats.regressingWords.find((w) => w.word === 'really')
+  check('regressing words identifies really with score drop', Boolean(reallyRegressing), true)
+  check('regressing word records drop points', (reallyRegressing?.dropPoints ?? 0) >= 10, true)
+
+  // 4. Common American English priority list check
+  check('common English priority list is populated', stats.commonEnglishPriorities.length > 0, true)
+  const topCommon = stats.commonEnglishPriorities[0]
+  check('top common word has priorityRank assigned', topCommon?.priorityRank, 1)
+  check('top common word has American English frequency rank', (topCommon?.englishRank ?? 0) > 0, true)
+  // Unpracticed high-frequency words containing weak sound /ɹ/
+  const unpracticedR = stats.commonEnglishPriorities.find((w) => w.isUnpracticedWithWeakSounds && w.weakPhones.includes('ɹ'))
+  check('suggests unpracticed high-frequency American words containing weak sound', Boolean(unpracticedR), true)
+
+  // 5. JSON export includes the priority lists and regressions
+  const jsonReport = exportStatsReport(stats)
+  const parsed = JSON.parse(jsonReport)
+  check('exported JSON includes freeSpeechPriorities', (parsed.freeSpeechPriorities?.length ?? 0) > 0, true)
+  check('exported JSON includes commonEnglishPriorities', (parsed.commonEnglishPriorities?.length ?? 0) > 0, true)
+  check('exported JSON includes regressingPhonemes', (parsed.regressingPhonemes?.length ?? 0) > 0, true)
+  check('exported JSON includes regressingWords', (parsed.regressingWords?.length ?? 0) > 0, true)
 })
 
 console.log(failures === 0 ? '\nall checks passed' : `\n${failures} check(s) failed`)

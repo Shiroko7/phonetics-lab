@@ -22,6 +22,13 @@ export interface WeakPhoneStat {
   count: number
 }
 
+export interface StruggleHistoryEntry {
+  at: number
+  score: number
+  verdict: 'good' | 'ok' | 'poor'
+  said?: string
+}
+
 export interface StruggledWord {
   /** Normalized lowercase word key, e.g. "schedule", "thought", "squirrel" */
   word: string
@@ -41,6 +48,10 @@ export interface StruggledWord {
   bestScore: number
   /** Timestamp of the most recent attempt */
   lastSeen: number
+  /** Timestamp when the word was first attempted / struggled with */
+  firstSeen?: number
+  /** Chronological history of attempts on this word */
+  history?: StruggleHistoryEntry[]
   /** Phonemes that failed in this word, ordered by frequency of failure */
   weakPhones: WeakPhoneStat[]
   /** What the user was heard saying instead (recent examples) */
@@ -93,6 +104,15 @@ export function saveStruggles(words: StruggledWord[]): void {
   }
 }
 
+/** Clear the trouble words bank from local storage. */
+export function clearStruggles(): void {
+  try {
+    localStorage.removeItem(STRUGGLES_KEY)
+  } catch {
+    // Storage failure must not break practice
+  }
+}
+
 /**
  * Record a take's word-by-word reports into the struggle bank.
  *
@@ -132,6 +152,8 @@ export function recordWordReports(
         lastScore: report.score,
         bestScore: report.score,
         lastSeen: at,
+        firstSeen: at,
+        history: [{ at, score: report.score, verdict: report.verdict, said: report.said }],
         weakPhones: [...phoneCounts.entries()]
           .map(([phone, count]) => ({ phone, count }))
           .sort((a, b) => b.count - a.count),
@@ -141,9 +163,14 @@ export function recordWordReports(
     } else {
       entry.totalAttempts++
       entry.lastSeen = at
+      entry.firstSeen = entry.firstSeen ?? at
       entry.lastScore = report.score
       entry.lowestScore = Math.min(entry.lowestScore, report.score)
       entry.bestScore = Math.max(entry.bestScore, report.score)
+      entry.history = [
+        ...(entry.history ?? []),
+        { at, score: report.score, verdict: report.verdict, said: report.said },
+      ].slice(-50)
 
       if (struggled) {
         entry.struggleCount++
@@ -227,6 +254,8 @@ export function addManualWord(
     lastScore: 0,
     bestScore: 0,
     lastSeen: Date.now(),
+    firstSeen: Date.now(),
+    history: [],
     weakPhones: phones.slice(0, 2).map((p) => ({ phone: p, count: 1 })),
     recentSaid: [],
     pinned: true,

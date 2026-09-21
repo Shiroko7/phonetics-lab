@@ -39,6 +39,10 @@ export interface Attempt {
   scorer?: Scorer
   /** `SCORER_REVISION` at the time this was scored. Absent on anything older. */
   rev?: number
+  /** Duration of the recording in milliseconds if available. */
+  durationMs?: number
+  /** Recording mode: free speech vs scripted. */
+  mode?: 'scripted' | 'free'
 }
 
 export function scorerOf(attempt: Attempt): Scorer {
@@ -71,7 +75,7 @@ export interface PhoneStat {
 }
 
 const HISTORY_KEY = 'phonetics-lab:attempts'
-const MAX_ATTEMPTS = 200
+const MAX_ATTEMPTS = 500
 
 export function loadAttempts(): Attempt[] {
   try {
@@ -89,6 +93,14 @@ export function saveAttempts(attempts: Attempt[]): void {
     localStorage.setItem(HISTORY_KEY, JSON.stringify(attempts.slice(-MAX_ATTEMPTS)))
   } catch {
     // History is a convenience; a full or blocked store must not break practice.
+  }
+}
+
+export function clearStoredAttempts(): void {
+  try {
+    localStorage.removeItem(HISTORY_KEY)
+  } catch {
+    // Optional storage removal
   }
 }
 

@@ -182,6 +182,14 @@ export function saveDailyState(state: DailyState): void {
   }
 }
 
+export function clearDailyState(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    // Optional storage removal
+  }
+}
+
 /** Local calendar key; daily practice should not split around UTC midnight. */
 export function localDateKey(at = Date.now()): string {
   const date = new Date(at)

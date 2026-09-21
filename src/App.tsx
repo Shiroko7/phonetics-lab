@@ -53,7 +53,7 @@ export default function App() {
   const [rate, setRate] = useState(1)
 
   // Default view is Practice (Speaking Studio)
-  const [view, setView] = useState<'practice' | 'daily' | 'lookup' | 'vowels'>('practice')
+  const [view, setView] = useState<'practice' | 'daily' | 'lookup' | 'vowels' | 'stats'>('practice')
 
   const [drillSound, setDrillSound] = useState<string | null>(null)
   const [attempts, setAttempts] = useState<Attempt[]>(() => loadAttempts())

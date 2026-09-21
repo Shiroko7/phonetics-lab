@@ -33,10 +33,11 @@ import {
 import { PHONES } from './phones.ts'
 import { contextsForWord } from './context.ts'
 import {
-  loadStruggles, saveStruggles, recordWordReports, removeStruggledWord,
+  loadStruggles, saveStruggles, clearStruggles, recordWordReports, removeStruggledWord,
   togglePinnedWord, addManualWord, syncStrugglesFromAttempts, isStrugglingLot,
   buildDrillForWord, buildDrillForStruggledWords, type StruggledWord,
 } from './struggles.ts'
+import { clearDailyState } from './daily.ts'
 
 export interface PracticeProps {
   text: string
@@ -343,6 +344,11 @@ export function usePracticeState({
       const expected = flatten(wordList)
       const variantMap = extractVariantMap(wordList)
 
+      const existingDuration = editing !== null ? attempts[editing]?.durationMs : undefined
+      const durationMs = playback?.durationMs ?? existingDuration
+      const existingMode = editing !== null ? attempts[editing]?.mode : undefined
+      const attemptMode = existingMode ?? mode
+
       if (backend && expected.length > 0) {
         const blob = playback?.blob ?? (await getClip(at))?.blob
         if (blob) {
@@ -358,6 +364,8 @@ export function usePracticeState({
                 at,
                 scorer: 'gop',
                 rev: SCORER_REVISION,
+                durationMs,
+                mode: attemptMode,
               },
               editing ?? undefined,
             )
@@ -372,7 +380,7 @@ export function usePracticeState({
       setAligned(result)
       updateStrugglesWithTake(phrase, result, at)
       onAttempt(
-        { target: phrase, aligned: result, score: scoreAlignment(result), at, scorer: 'browser' },
+        { target: phrase, aligned: result, score: scoreAlignment(result), at, scorer: 'browser', durationMs, mode: attemptMode },
         editing ?? undefined,
       )
     },
@@ -488,6 +496,8 @@ export function usePracticeState({
           at,
           scorer: 'gop',
           rev: SCORER_REVISION,
+          durationMs: taken.durationMs,
+          mode,
         })
         return
       }
@@ -534,7 +544,13 @@ export function usePracticeState({
       )
 
       onAttempt({
-        target: phrase, aligned: result, score: scoreAlignment(result), at, scorer: 'browser',
+        target: phrase,
+        aligned: result,
+        score: scoreAlignment(result),
+        at,
+        scorer: 'browser',
+        durationMs: taken.durationMs,
+        mode,
       })
     } catch (err) {
       setError(`Analysis failed: ${(err as Error).message}`)
@@ -556,6 +572,20 @@ export function usePracticeState({
     setClips(new Set())
     onClearHistory()
   }, [attempts.length, onClearHistory])
+
+  const resetAllData = useCallback(
+    (fullReset = false) => {
+      setEditing(null)
+      setClips(new Set())
+      onClearHistory()
+      if (fullReset) {
+        setStruggles([])
+        clearStruggles()
+        clearDailyState()
+      }
+    },
+    [onClearHistory],
+  )
 
   const reopen = useCallback(
     async (index: number) => {
@@ -842,6 +872,7 @@ export function usePracticeState({
     silence, speak, toggle, playWord, seek,
     beginRecording, finishRecording,
     clearHistory: handleClearHistory,
+    resetAllData,
     reopen, removeAttempt, again, setLine, practise, sayPhrase,
     stepTo, startDrill, drillWord, practiseWord, drillAllTrouble, shuffleCurrentDrill, endDrill,
     handleAddWord, removeWord, togglePin, clearTroubles, toggleSound,

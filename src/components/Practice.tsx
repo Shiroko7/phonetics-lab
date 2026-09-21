@@ -411,6 +411,11 @@ export function Practice({
       const at = (editing !== null ? attempts[editing]?.at : undefined) ?? Date.now()
       const expected = flatten(wordsFor(phrase))
 
+      const existingDuration = editing !== null ? attempts[editing]?.durationMs : undefined
+      const durationMs = playback?.durationMs ?? existingDuration
+      const existingMode = editing !== null ? attempts[editing]?.mode : undefined
+      const attemptMode = existingMode ?? mode
+
       if (backend && expected.length > 0) {
         const blob = playback?.blob ?? (await getClip(at))?.blob
         if (blob) {
@@ -426,6 +431,8 @@ export function Practice({
                 at,
                 scorer: 'gop',
                 rev: SCORER_REVISION,
+                durationMs,
+                mode: attemptMode,
               },
               editing ?? undefined,
             )
@@ -441,7 +448,7 @@ export function Practice({
       setAligned(result)
       updateStrugglesWithTake(phrase, result, at)
       onAttempt(
-        { target: phrase, aligned: result, score: scoreAlignment(result), at, scorer: 'browser' },
+        { target: phrase, aligned: result, score: scoreAlignment(result), at, scorer: 'browser', durationMs, mode: attemptMode },
         editing ?? undefined,
       )
     },
@@ -585,6 +592,8 @@ export function Practice({
           at,
           scorer: 'gop',
           rev: SCORER_REVISION,
+          durationMs: taken.durationMs,
+          mode,
         })
         return
       }
@@ -640,7 +649,13 @@ export function Practice({
       )
 
       onAttempt({
-        target: phrase, aligned: result, score: scoreAlignment(result), at, scorer: 'browser',
+        target: phrase,
+        aligned: result,
+        score: scoreAlignment(result),
+        at,
+        scorer: 'browser',
+        durationMs: taken.durationMs,
+        mode,
       })
     } catch (err) {
       setError(`Analysis failed: ${(err as Error).message}`)

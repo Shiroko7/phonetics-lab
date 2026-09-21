@@ -16,10 +16,11 @@ import { SettingsDrawer } from './shared/SettingsDrawer.tsx'
 import { Vowels } from './Vowels.tsx'
 import { formatIPA } from '../lib/display.ts'
 import { DailyPractice } from './DailyPractice.tsx'
+import { StatsSummary } from './StatsSummary.tsx'
 
 interface Props {
-  view: 'practice' | 'daily' | 'lookup' | 'vowels'
-  setView: (v: 'practice' | 'daily' | 'lookup' | 'vowels') => void
+  view: 'practice' | 'daily' | 'lookup' | 'vowels' | 'stats'
+  setView: (v: 'practice' | 'daily' | 'lookup' | 'vowels' | 'stats') => void
   practice: PracticeState
   // Lookup props
   text: string
@@ -133,6 +134,12 @@ export function SplitLab({
             onClick={() => setView('vowels')}
           >
             Vowel Chart
+          </button>
+          <button
+            className={`split-tab-btn ${view === 'stats' ? 'active' : ''}`}
+            onClick={() => setView('stats')}
+          >
+            Stats &amp; Progress
           </button>
         </nav>
 
@@ -376,6 +383,17 @@ export function SplitLab({
               attempts={attempts}
               onPlay={onSay}
               onPractise={onPractisePhone}
+            />
+          </div>
+        )}
+
+        {view === 'stats' && (
+          <div className="split-stats-wrapper">
+            <StatsSummary
+              practice={practice}
+              dict={dict}
+              onPractisePhone={onPractisePhone}
+              onNavigateToPractice={() => setView('practice')}
             />
           </div>
         )}
