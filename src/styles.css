@@ -5978,3 +5978,25 @@ button.recording {
   padding-top: 10px;
   border-top: 1px solid var(--line);
 }
+
+/* Practice decisions are separate from raw acoustic score badges. */
+.review-actions, .sound-review-patterns {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin: 12px 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+.review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.review-actions p { flex-basis: 100%; margin: 0; }
+.review-actions button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+.sound-review-patterns h4 { margin: 0; color: var(--ink); }
+.sound-review-patterns ul { list-style: none; padding: 0; }
+.sound-review-patterns li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.sound-review-patterns li span { flex: 1 1 180px; }
+.phone-slot .slot-score { font-size: 11px; white-space: nowrap; }
+.phone-slot.unscored, .word-chip.uncertain { background: var(--bg-sunken); border-color: var(--line); color: var(--ink-soft); }
+.phone-slot { min-width: 65px; min-height: 90px; height: auto; padding: 6px 4px; }
+.word-chip small { font-size: 10px; }

@@ -18,6 +18,8 @@ interface Props {
   voiceURI: string
   onVoice: (uri: string) => void
   onPreviewVoice: () => void
+  practiceThreshold: number
+  onPracticeThreshold: (value: number) => void
 }
 
 export function SettingsDrawer({
@@ -33,6 +35,7 @@ export function SettingsDrawer({
   voiceURI,
   onVoice,
   onPreviewVoice: _onPreviewVoice,
+  practiceThreshold, onPracticeThreshold,
 }: Props) {
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [showVoices, setShowVoices] = useState(false)
@@ -55,6 +58,13 @@ export function SettingsDrawer({
         </div>
 
         <div className="settings-drawer-content">
+          <section className="settings-section">
+            <h4 className="section-title">Practice feedback</h4>
+            <label htmlFor="practice-threshold">Sound practice threshold: <strong>{practiceThreshold}/100</strong></label>
+            <input id="practice-threshold" className="range-input" type="range" min={0} max={100} step={1}
+              value={practiceThreshold} onChange={(e) => onPracticeThreshold(Number(e.target.value))} />
+            <p className="daily-help">Sounds below this score are suggested for review. This is a practice preference, not a correctness probability. Changing it never changes your scores; 100 remains possible.</p>
+          </section>
           {/* Display settings */}
           <section className="settings-section">
             <h4 className="section-title">Phonetic Display</h4>

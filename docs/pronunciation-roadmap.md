@@ -38,6 +38,15 @@ Revision 2 is a reliability baseline, not a validated accuracy improvement on hu
 - Revision-aware comparison prevents direct last/best comparisons across scoring
   scales in the active Studio/Daily controller. A stale service cannot silently answer
   the new structured request as though it supported it.
+- Sound-focused practice policy: configurable 80/100 threshold, individual phone
+  scores, explicit unassessed timing, reversible word-review choices, and recurring
+  flags from first takes separated by scorer revision. Daily uses the same threshold;
+  review choices cannot rewrite original evidence. This is a coaching improvement,
+  not new acoustic accuracy. [Workflow and score interpretation](practice-feedback.md).
+- An exact-canonical, distinct-span adapter now checks phone flags against existing
+  five-rater annotations. The 80-point pilot has 63.1% mapping coverage and substantial
+  disagreement with majority-human incorrect/missed labels; details and exclusions
+  are in the [phone benchmark](human-benchmarks.md#phone-flag-pilot).
 
 Regression checks: `npm run check`, `make check-api`, and
 `node scripts/check-daily-browser.mjs` with the web server running. They use synthetic
@@ -92,6 +101,8 @@ runner and the first real-data baseline: 100 speakers / 632 words, with Pearson
 correlations of 0.455 for sentence accuracy and 0.336 for word accuracy. These are
 not accuracy percentages. Prosody/fluency/stress predictions and human word-boundary
 validation are still absent. No scoring thresholds were tuned on this pilot.
+Phone-level evaluation is now partial rather than absent; the new practice workflow
+is implemented, but phase 1's evidence gates and phase 3's validity gate remain open.
 
 Remaining phase-1 work includes development/calibration splits, manually timed
 evidence, representative personal/native-US recordings, independent adjudication,

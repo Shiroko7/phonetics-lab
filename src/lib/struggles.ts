@@ -15,6 +15,7 @@ import { buildDrill, phrasesFor, type DrillPhrase, type DrillSet, type DrillStep
 import { byWord, flatten, targetWords, type WordReport } from './report.ts'
 import type { Attempt } from './practice.ts'
 import { PHONES } from './phones.ts'
+import { DEFAULT_PRACTICE_THRESHOLD, soundPracticeStatus, wordPracticeStatus } from './practicePolicy.ts'
 import { contextsForWord, contextSentences, isPracticeContext } from './context.ts'
 
 export interface WeakPhoneStat {
@@ -71,9 +72,8 @@ export function normalizeWord(raw: string): string {
 }
 
 /** Whether a word attempt is considered a struggle. */
-export function isStruggleReport(word: WordReport): boolean {
-  if (word.verdict === 'poor' || word.verdict === 'ok' || word.score < 85) return true
-  return word.steps.some((step) => step.verdict !== 'correct')
+export function isStruggleReport(word: WordReport, threshold = DEFAULT_PRACTICE_THRESHOLD): boolean {
+  return wordPracticeStatus(word, threshold) === 'review'
 }
 
 /** Whether a stored word qualifies as "struggles a lot" / needs urgent focus. */
@@ -137,7 +137,7 @@ export function recordWordReports(
 
     if (!entry) {
       if (!struggled) continue // Only track words when they first encounter difficulty
-      const wrongSteps = report.steps.filter((s) => s.verdict !== 'correct')
+      const wrongSteps = report.steps.filter((s) => soundPracticeStatus(s) === 'review')
       const phoneCounts = new Map<string, number>()
       for (const s of wrongSteps) {
         if (s.expected) phoneCounts.set(s.expected, (phoneCounts.get(s.expected) ?? 0) + 1)
@@ -176,7 +176,7 @@ export function recordWordReports(
         entry.struggleCount++
         const phoneCounts = new Map<string, number>(entry.weakPhones.map((p) => [p.phone, p.count]))
         for (const s of report.steps) {
-          if (s.expected && s.verdict !== 'correct') {
+          if (s.expected && soundPracticeStatus(s) === 'review') {
             phoneCounts.set(s.expected, (phoneCounts.get(s.expected) ?? 0) + 1)
           }
         }

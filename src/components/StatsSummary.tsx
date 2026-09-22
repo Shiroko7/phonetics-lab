@@ -10,7 +10,8 @@ import {
 } from '../lib/analytics.ts'
 import { PHONES } from '../lib/phones.ts'
 import type { PracticeState } from '../lib/usePracticeState.ts'
-import { band } from '../lib/usePracticeState.ts'
+import { band as scoreBand } from '../lib/usePracticeState.ts'
+import { SoundReviewPatterns } from './shared/SoundReviewPatterns.tsx'
 import type { Dictionary } from '../lib/dict.ts'
 import { loadDailyState } from '../lib/daily.ts'
 import { getClip } from '../lib/clips.ts'
@@ -44,6 +45,7 @@ export function StatsSummary({
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null)
 
   const { attempts, struggles, clips, reopen, practiseWord, setLine } = practice
+  const band = (score: number) => scoreBand(score, practice.practiceThreshold)
   const dailyState = useMemo(() => loadDailyState(), [])
 
   useEffect(() => {
@@ -217,6 +219,8 @@ export function StatsSummary({
 
   return (
     <div className="stats-container">
+      <SoundReviewPatterns practice={practice} />
+      <p className="daily-help">The first-take panel above uses your current sound-review policy. Historical analytics below retain original model verdicts and include retries; their accuracy and mastery labels are model summaries, not human-validated correctness or practice pass rates.</p>
       {/* HEADER BAR & CONTROLS */}
       <header className="stats-header">
         <div className="stats-header-titles">
@@ -421,14 +425,14 @@ export function StatsSummary({
               <div>
                 <h3>Pronunciation Score Progression Over Time</h3>
                 <p className="panel-desc">
-                  Every recording take plotted chronologically with moving average curve and the 85-point mastery threshold.
+                  Recording averages over time. The guide shows your current sound threshold, not a sentence pass mark or proof of mastery.
                 </p>
               </div>
             </div>
 
             {stats.timelinePoints.length > 0 ? (
               <div className="trend-chart-container">
-                <ScoreProgressionChart points={stats.timelinePoints} />
+                <ScoreProgressionChart points={stats.timelinePoints} threshold={practice.practiceThreshold} />
               </div>
             ) : (
               <div className="panel-empty-notice">Not enough takes in this time window to draw trend curve.</div>
@@ -1591,7 +1595,7 @@ export function StatsSummary({
 /**
  * Responsive SVG chart for chronological score progression.
  */
-function ScoreProgressionChart({ points }: { points: { at: number; score: number; rollingAvg: number; target: string; formattedDate: string }[] }) {
+function ScoreProgressionChart({ points, threshold }: { points: { at: number; score: number; rollingAvg: number; target: string; formattedDate: string }[]; threshold: number }) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
 
   if (points.length === 0) return null
@@ -1626,7 +1630,7 @@ function ScoreProgressionChart({ points }: { points: { at: number; score: number
     <div className="svg-chart-wrapper">
       <svg viewBox={`0 0 ${width} ${height}`} className="score-progression-svg" preserveAspectRatio="none">
         {/* Grid lines */}
-        {[85, 65, 50].map((yVal) => (
+        {[...new Set([threshold, 50, 0])].map((yVal) => (
           <g key={yVal} className="grid-group">
             <line
               x1={padding.left}
@@ -1634,8 +1638,8 @@ function ScoreProgressionChart({ points }: { points: { at: number; score: number
               x2={padding.left + chartW}
               y2={getY(yVal)}
               stroke="var(--line)"
-              strokeDasharray={yVal === 85 ? '4 4' : '2 2'}
-              strokeWidth={yVal === 85 ? 1.5 : 1}
+              strokeDasharray={yVal === threshold ? '4 4' : '2 2'}
+              strokeWidth={yVal === threshold ? 1.5 : 1}
             />
             <text
               x={padding.left - 8}
@@ -1650,16 +1654,16 @@ function ScoreProgressionChart({ points }: { points: { at: number; score: number
           </g>
         ))}
 
-        {/* 85 Mastery threshold label */}
+        {/* Practice guide, not calibrated mastery */}
         <text
           x={padding.left + chartW - 5}
-          y={getY(85) - 6}
+          y={getY(threshold) - 6}
           textAnchor="end"
           fontSize="10"
           fill="var(--good)"
           fontWeight="600"
         >
-          Mastery Target (85)
+          Sound threshold ({threshold})
         </text>
 
         {/* Rolling Average Curve */}
@@ -1686,7 +1690,7 @@ function ScoreProgressionChart({ points }: { points: { at: number; score: number
               cx={cx}
               cy={cy}
               r={isHovered ? 7 : 4}
-              fill={p.score >= 85 ? 'var(--good)' : p.score >= 65 ? 'var(--ok)' : 'var(--poor)'}
+              fill={p.score >= threshold ? 'var(--good)' : 'var(--poor)'}
               stroke="var(--bg-panel)"
               strokeWidth={isHovered ? 2 : 1}
               className="chart-data-dot"
@@ -1702,7 +1706,7 @@ function ScoreProgressionChart({ points }: { points: { at: number; score: number
         <div className="chart-tooltip-bubble">
           <div className="tooltip-header">
             <span className="tooltip-date">{hoveredPoint.formattedDate}</span>
-            <span className={`tooltip-score ${band(hoveredPoint.score)}`}>
+            <span className={`tooltip-score ${scoreBand(hoveredPoint.score, threshold)}`}>
               {hoveredPoint.score} pts
             </span>
           </div>

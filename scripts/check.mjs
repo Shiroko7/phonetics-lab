@@ -397,15 +397,16 @@ group('a known confusion picks the phrase that exposes it', () => {
 })
 
 group('a drill is scored on the sounds it was built for', () => {
+  const timed = (text) => normalizeRecognized(text).map((p, i) => ({ ...p, start: i / 10, end: (i + 1) / 10 }))
   const words = targetWords('think about this', dict)
   const want = flatten(words)
-  const aligned = alignPhones(want, normalizeRecognized('sɪŋk əbaʊt ðɪs'))
+  const aligned = alignPhones(want, timed('sɪŋk əbaʊt ðɪs'))
 
   const [th] = focusScore(aligned, ['θ'])
   check('the drilled sound is counted', th.seen, 1)
   check('and marked wrong when it is', th.right, 0)
 
-  const clean = alignPhones(want, normalizeRecognized('θɪŋk əbaʊt ðɪs'))
+  const clean = alignPhones(want, timed('θɪŋk əbaʊt ðɪs'))
   check('a clean take scores full', focusScore(clean, ['θ'])[0].right, 1)
 
   // Sounds the line never contained are not reported as perfect.
@@ -578,7 +579,7 @@ group('trouble words bank tracks struggles, persistence and targeted drills', ()
 
   // Take with a struggling word: "think" pronounced as "sink"
   const words = targetWords('I think this is good', dict)
-  const heard = normalizeRecognized('aɪ sɪŋk ðɪs ɪz ɡʊd')
+  const heard = normalizeRecognized('aɪ sɪŋk ðɪs ɪz ɡʊd').map((p, i) => ({ ...p, start: i / 10, end: (i + 1) / 10 }))
   const report = byWord(words, alignPhones(flatten(words), heard))
 
   const thinkWord = report.find((w) => w.text.toLowerCase() === 'think')
@@ -661,43 +662,20 @@ group('daily deck schedules retention rather than a finite course', () => {
   check('daily summary counts the later rating', summaryForDay(state, localDateKey(secondAt)).reviews, 1)
 })
 
-group('daily scoring uses tolerance bands rather than perfection', () => {
-  const step = (verdict, actual = 's') => ({
-    expected: 'θ', actual, verdict, distance: verdict === 'correct' ? 0 : 0.2,
-    expectedIndex: 0, start: null, end: null,
-  })
+group('daily practice applies the same individual-sound threshold', () => {
+  const step = (value) => ({ expected: 'θ', actual: 'θ', verdict: 'correct', distance: 0,
+    expectedIndex: 0, start: 0, end: 0.1, score: value })
   const score = (overall) => ({ overall, correct: 1, close: 0, wrong: 0, missing: 0, extra: 0 })
-
-  const close = automaticDailyOutcome(['θ'], [step('close')], score(92), [])
-  check('a close target is not forced to repeat', close.retry, false)
-  check('a close target keeps a conservative rating', close.rating, 'hard')
-
-  for (const overall of [90, 92, 95, 100]) {
-    for (const verdict of ['wrong', 'missing']) {
-      const outcome = automaticDailyOutcome(['θ'], [step(verdict, verdict === 'missing' ? null : 'k')], score(overall), [])
-      check(`${overall} is enough despite a ${verdict} target`, outcome.retry, false)
-      check(`${overall} with a ${verdict} target keeps a conservative review`, outcome.rating, 'hard')
-    }
-    const poorWord = automaticDailyOutcome(['θ'], [step('correct', 'θ')], score(overall), [{ score: 60 }])
-    check(`${overall} is enough despite a flagged word`, poorWord.retry, false)
-    check(`${overall} with a flagged word keeps a conservative review`, poorWord.rating, 'hard')
+  check('79 asks for review even with a high average', automaticDailyOutcome(['θ'], [step(79)], score(99), []).retry, true)
+  for (const value of [80, 95, 100]) {
+    const outcome = automaticDailyOutcome(['θ'], [step(value)], score(value), [])
+    check(`${value} meets the threshold`, outcome.retry, false)
+    check(`${value} is a good practice take, not a mastery claim`, outcome.rating, 'good')
   }
-
-  const gross = automaticDailyOutcome(['θ'], [step('wrong', 'k')], score(89), [])
-  check('a target error below 90 suggests another pass', gross.retry, true)
-  const poorWord = automaticDailyOutcome(['θ'], [step('correct', 'θ')], score(89), [{ score: 60 }])
-  check('a flagged word below 90 suggests another pass', poorWord.retry, true)
-
-  const good = automaticDailyOutcome(['θ'], [step('correct', 'θ')], score(90), [])
-  check('90 is enough for a good take', good.retry, false)
-  check('a clean 90 keeps its good rating', good.rating, 'good')
-  check('a clean 95 keeps its easy rating', automaticDailyOutcome(['θ'], [step('correct', 'θ')], score(95), []).rating, 'easy')
-  check('a usable 89 can still move on', automaticDailyOutcome(['θ'], [step('correct', 'θ')], score(89), []).retry, false)
-  check('a missing score does not pass', automaticDailyOutcome(['θ'], [step('correct', 'θ')], null, []).retry, true)
-  check('an unavailable target does not pass', automaticDailyOutcome(['s'], [step('correct', 'θ')], score(90), []).retry, true)
-
-  const low = automaticDailyOutcome(['θ'], [step('correct', 'θ')], score(77), [])
-  check('a low whole-line score asks for another pass', low.retry, true)
+  check('a custom threshold is honored', automaticDailyOutcome(['θ'], [step(79)], score(79), [], 75).retry, false)
+  check('a missing score is unassessed', automaticDailyOutcome(['θ'], [step(100)], null, []).assessed, false)
+  check('an unavailable target is unassessed', automaticDailyOutcome(['s'], [step(100)], score(100), []).assessed, false)
+  check('missing timing is not a pronunciation failure', automaticDailyOutcome(['θ'], [{ ...step(20), end: null }], score(20), []).assessed, false)
 })
 
 group('Daily varies contexts and voices without leaking transfer sentences', () => {
@@ -834,7 +812,8 @@ group('word practice uses real contexts and migrates only pending carrier exerci
   check('old unquoted carrier is rejected', isPracticeContext(`Please say ${word} once again.`, dict, word), false)
   check('old quoted carrier is rejected', isPracticeContext(`The storyteller used "${word}" while describing the journey.`, dict, word), false)
   const reportWords = targetWords(source, dict)
-  const reports = byWord(reportWords, alignPhones(flatten(reportWords), []))
+  const reports = byWord(reportWords, flatten(reportWords).map((expected, i) => ({ expected, expectedIndex: i,
+    actual: expected, verdict: 'wrong', score: 20, distance: 0, start: i / 10, end: (i + 1) / 10 })))
   const saved = recordWordReports([], reports, base, source).find((item) => item.word === word)
   check('trouble bank retains the original sentence', saved.contexts[0], source)
 

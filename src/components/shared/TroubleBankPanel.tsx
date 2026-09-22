@@ -1,6 +1,7 @@
 import { formatIPA } from '../../lib/display.ts'
 import { isStrugglingLot } from '../../lib/struggles.ts'
 import { band, type PracticeState } from '../../lib/usePracticeState.ts'
+import { SoundReviewPatterns } from './SoundReviewPatterns.tsx'
 
 interface Props {
   practice: PracticeState
@@ -32,6 +33,8 @@ export function TroubleBankPanel({ practice, layout = 'compact' }: Props) {
 
   return (
     <div className={`trouble-bank-panel ${layout}`}>
+      <SoundReviewPatterns practice={practice} />
+      <p className="daily-help">Current review queue · {practice.reviewPatterns.scale} · sound threshold {practice.practiceThreshold}/100. Pins are your choices; original recordings and legacy trouble history are retained.</p>
       <div className="trouble-panel-header">
         <div className="trouble-header-info">
           <h4>
@@ -151,10 +154,10 @@ export function TroubleBankPanel({ practice, layout = 'compact' }: Props) {
 
                 <div className="trouble-stats-row">
                   <span className="attempts-tag">
-                    {entry.struggleCount}/{entry.totalAttempts} struggles
+                    {entry.struggleCount}/{entry.totalAttempts} first takes flagged
                   </span>
                   {entry.lastScore > 0 && (
-                    <span className={`score-mini-tag ${band(entry.lastScore)}`}>
+                    <span className={`score-mini-tag ${band(entry.lastScore, practice.practiceThreshold)}`}>
                       {entry.lastScore}
                     </span>
                   )}

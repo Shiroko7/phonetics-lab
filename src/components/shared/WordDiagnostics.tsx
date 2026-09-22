@@ -1,4 +1,5 @@
 import { formatIPA } from '../../lib/display.ts'
+import { practiceClass, soundPracticeStatus, soundScore, wordPracticeStatus } from '../../lib/practicePolicy.ts'
 import {
   band,
   changeOf,
@@ -45,6 +46,16 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
   } = practice
 
   if (!aligned || !score || report.length === 0) return null
+  const threshold = practice.practiceThreshold
+  const choice = practice.reviewChoices[opened]
+  const statuses = report.flatMap((word, i) => word.steps.filter((s) => s.expected).map((s) =>
+    soundPracticeStatus(s, threshold, wordPracticeStatus(word, threshold) === 'unscored' || practice.reviewChoices[i] === 'bad-cut')))
+  const focused = focus.map((hit) => {
+    const sounds = report.flatMap((word, i) => word.steps.filter((s) => s.expected === hit.phone).map((s) =>
+      soundPracticeStatus(s, threshold, wordPracticeStatus(word, threshold) === 'unscored' || practice.reviewChoices[i] === 'bad-cut')))
+    return { phone: hit.phone, seen: sounds.length, right: sounds.filter((s) => s === 'met').length,
+      unscored: sounds.filter((s) => s === 'unscored').length }
+  })
 
   return (
     <div className={`word-diagnostics-deck ${compact ? 'compact' : ''}`}>
@@ -57,13 +68,14 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
       {/* Top Score Banner */}
       <div className="score-summary-card">
         <div className="score-summary-left">
-          <div className={`score-badge-large ${band(score.overall)}`}>
+          <div className={`score-badge-large ${band(score.overall, threshold)}`}>
             <span className="score-value">{score.overall}</span>
-            <span className="score-label">SCORE</span>
+            <span className="score-label">AVERAGE</span>
           </div>
 
           <div className="score-meta">
             <span className="inspection-said">Pronunciation estimate · stress and rhythm aren’t assessed yet</span>
+            <span className="inspection-said">Sound practice threshold: {threshold}/100 · a high average can still contain a sound to review</span>
             {earlier && (
               <div className={`score-delta-chip ${changeOf(score.overall - earlier.score.overall)}`}>
                 {score.overall === earlier.score.overall ? (
@@ -81,11 +93,9 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
             )}
 
             <div className="score-counts-row">
-              <span className="count-item good"><b>{score.correct}</b> right</span>
-              <span className="count-item ok"><b>{score.close}</b> close</span>
-              <span className="count-item poor"><b>{score.wrong}</b> wrong</span>
-              {score.missing > 0 && <span className="count-item poor"><b>{score.missing}</b> missed</span>}
-              {score.extra > 0 && <span className="count-item poor"><b>{score.extra}</b> extra</span>}
+              <span className="count-item good"><b>{statuses.filter((s) => s === 'met').length}</b> meet threshold</span>
+              <span className="count-item poor"><b>{statuses.filter((s) => s === 'review').length}</b> to review</span>
+              <span className="count-item"><b>{statuses.filter((s) => s === 'unscored').length}</b> unassessed</span>
             </div>
           </div>
         </div>
@@ -126,21 +136,21 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
 
       {focus.length > 0 && (
         <div className="focus-chips-bar">
-          <span className="focus-title">Target sounds:</span>
-          {focus.map((hit) => (
+          <span className="focus-title">Target sounds meeting threshold:</span>
+          {focused.map((hit) => (
             <span
               key={hit.phone}
               className={`focus-chip ${
-                hit.right === hit.seen
+                hit.unscored > 0
+                  ? 'uncertain'
+                  : hit.right === hit.seen
                   ? 'good'
-                  : hit.right + hit.close >= hit.seen
-                    ? 'ok'
-                    : 'poor'
+                  : 'poor'
               }`}
             >
               <span className="ipa">/{hit.phone}/</span>
               <span className="num">
-                {hit.right}/{hit.seen}
+                {hit.right}/{hit.seen}{hit.unscored > 0 ? ` · ${hit.unscored} unassessed` : ''}
               </span>
             </span>
           ))}
@@ -153,9 +163,9 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
           {report.map((word, i) => (
             <button
               key={`${word.text}-${i}`}
-              className={`word-chip ${word.verdict}${i === opened ? ' active' : ''}`}
+              className={`word-chip ${practiceClass(practice.reviewChoices[i] === 'bad-cut' ? 'unscored' : wordPracticeStatus(word, threshold))}${i === opened ? ' active' : ''}`}
               onClick={() => setOpened(i)}
-              title={word.connectedNote ? `${word.text}: ${word.score}/100 · Connected speech variation` : `${word.score}/100`}
+              title={`${word.text}: ${word.score}/100 average · ${wordPracticeStatus(word, threshold) === 'review' ? 'contains a sound below threshold' : wordPracticeStatus(word, threshold) === 'met' ? 'assessed sounds meet threshold' : 'timing unavailable or ambiguous'}`}
             >
               <span className="word-text">{word.text}</span>
               {word.connectedNote && (
@@ -164,6 +174,7 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
                 </span>
               )}
               <span className="word-score">{word.score}</span>
+              {practice.reviewChoices[i] && <small>Reviewed</small>}
               {!!wordChange[i] && (
                 <span className={`word-delta ${changeOf(wordChange[i]!)}`}>
                   {wordChange[i]! > 0 ? '▲' : '▼'}{Math.abs(wordChange[i]!)}
@@ -192,7 +203,7 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
               >
                 ♪ Target
               </button>
-              {open.span && playback && (
+              {open.span && playback && choice !== 'bad-cut' && (
                 <button
                   className="ghost tiny"
                   onClick={() => void playWord(open.span!)}
@@ -231,14 +242,18 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
             {open.steps.map((step, i) => {
               const moved =
                 step.expectedIndex === null ? undefined : phoneChange.get(step.expectedIndex)
+              const status = soundPracticeStatus(step, threshold, wordPracticeStatus(open, threshold) === 'unscored' || choice === 'bad-cut')
+              const value = status === 'unscored' ? null : soundScore(step)
               return (
                 <div
                   key={i}
-                  className={`phone-slot ${step.verdict}${moved && moved !== 'same' ? ` ${moved}` : ''}`}
-                  title={tooltip(step)}
+                  className={`phone-slot ${status === 'met' ? 'correct' : status === 'review' ? 'wrong' : 'unscored'}${moved && moved !== 'same' ? ` ${moved}` : ''}`}
+                  title={value === null ? 'Unassessed timing; no pronunciation error inferred.' : tooltip(step, threshold)}
                 >
                   <div className="slot-expected">{step.expected ?? '–'}</div>
                   <div className="slot-actual">{step.actual ?? '–'}</div>
+                  <span className="slot-score">{value === null ? 'Unassessed' : `${value}/100`}</span>
+                  {status === 'review' && <small>Review</small>}
                   {moved === 'better' && <span className="slot-arrow up">▲</span>}
                   {moved === 'worse' && <span className="slot-arrow down">▼</span>}
                 </div>
@@ -246,14 +261,22 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
             })}
           </div>
 
-          {notesFor(open).length > 0 ? (
+          <div className="review-actions" aria-label="Review this word">
+            <p>These choices affect practice suggestions for this observation only—not its score or human benchmark labels.</p>
+            <button className="ghost small" aria-pressed={choice === 'accepted'} onClick={() => practice.resolveWordReview(opened, 'accepted')}>Sounds acceptable to me</button>
+            <button className="ghost small" aria-pressed={choice === 'later'} onClick={() => practice.resolveWordReview(opened, 'later')}>Practise later</button>
+            <button className="ghost small" aria-pressed={choice === 'bad-cut'} onClick={() => practice.resolveWordReview(opened, 'bad-cut')}>Bad word cut</button>
+            {choice && <button className="ghost small" onClick={() => practice.resolveWordReview(opened)}>Undo review choice</button>}
+            {choice && <p role="status">{choice === 'accepted' ? 'Accepted for practice. Original score preserved.' : choice === 'later' ? 'Kept for later practice; no immediate retry required.' : 'Flagged as a bad cut. Isolated replay is disabled; use In context or record again.'}</p>}
+          </div>
+          {wordPracticeStatus(open, threshold) === 'unscored' || choice === 'bad-cut' ? <p className="inspection-said">This word needs a timing check, not a pronunciation verdict. Listen in context or record again.</p> : notesFor(open, threshold).length > 0 ? (
             <ul className="inspection-notes">
-              {notesFor(open).map((note, i) => (
+              {notesFor(open, threshold).map((note, i) => (
                 <li key={i}>{note}</li>
               ))}
             </ul>
           ) : (
-            <div className="clean-verdict">All sounds in this word landed cleanly.</div>
+            <div className="clean-verdict">Assessed sounds meet your practice threshold. This is an estimate, not a guarantee.</div>
           )}
         </div>
       )}

@@ -57,7 +57,7 @@ export function HistoryPanel({ practice, layout = 'compact' }: Props) {
                     onClick={() => void reopen(index)}
                     title={attempt.target}
                   >
-                    <span className={`take-score-pill ${band(attempt.score.overall)}`}>
+                    <span className={`take-score-pill ${band(attempt.score.overall, practice.practiceThreshold)}`}>
                       {attempt.score.overall}
                     </span>
                     <span className="take-phrase-text">{attempt.target}</span>

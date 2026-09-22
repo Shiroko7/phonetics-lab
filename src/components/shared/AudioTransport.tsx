@@ -68,7 +68,7 @@ export function AudioTransport({ practice, size = 'normal', referenceDisabled, r
           ) : (
             <button
               className="record-btn idle"
-              onClick={onRecord ?? beginRecording}
+              onClick={onRecord ?? (() => void beginRecording())}
               disabled={busy || (mode === 'scripted' && !target)}
               title="Record your voice"
             >

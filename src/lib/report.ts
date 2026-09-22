@@ -12,6 +12,7 @@ import {
 } from './align.ts'
 import { analyze } from './analyze.ts'
 import type { Dictionary } from './dict.ts'
+import { DEFAULT_PRACTICE_THRESHOLD, soundPracticeStatus } from './practicePolicy.ts'
 
 /** One word of the target, with the phones it is expected to be made of. */
 export interface TargetWord {
@@ -220,9 +221,9 @@ export interface FocusReport {
   phone: string
   /** Times the sound was expected in the line. */
   seen: number
-  /** Times it landed. */
+  /** Assessed occurrences meeting the current practice threshold. */
   right: number
-  /** Times it drifted but stayed recognisable. */
+  /** Legacy field; current threshold policy does not have an intermediate band. */
   close: number
 }
 
@@ -233,15 +234,15 @@ export interface FocusReport {
  * in it are only there to carry the one that matters. "/ɔ/ 3 of 4" is the
  * answer to what was asked; the overall score is context.
  */
-export function focusScore(aligned: AlignedPhone[], phones: string[]): FocusReport[] {
+export function focusScore(aligned: AlignedPhone[], phones: string[], threshold = DEFAULT_PRACTICE_THRESHOLD): FocusReport[] {
   return phones
     .map((phone) => {
       const steps = aligned.filter((step) => step.expected === phone)
       return {
         phone,
         seen: steps.length,
-        right: steps.filter((step) => step.verdict === 'correct').length,
-        close: steps.filter((step) => step.verdict === 'close').length,
+        right: steps.filter((step) => soundPracticeStatus(step, threshold) === 'met').length,
+        close: 0,
       }
     })
     .filter((report) => report.seen > 0)

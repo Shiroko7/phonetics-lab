@@ -619,6 +619,9 @@ same recording differently.
 
 ## Known limits
 
+For the configurable 80/100 sound threshold, recurring first-take flags, reversible
+review choices, and why 100 remains possible, see [Practice feedback](docs/practice-feedback.md).
+
 - General American only. CMUdict is an American source; a British transcription would
   need a non-rhotic transform that this deliberately does not fake.
 - Homographs are not disambiguated by context. `read` shows its commonest pronunciation
@@ -626,7 +629,8 @@ same recording differently.
 - `1990s` tokenises as `1990` + `s`.
 - Practice feedback is only as good as the recogniser. It is trained on many languages and
   can misread a heavy accent, so a flagged phone is evidence rather than proof — treat a
-  repeated pattern across attempts as the real signal, not one bad slot.
+  repeated first-take pattern as a reason to investigate. Systematic model errors can
+  repeat too; recurrence alone does not prove a pronunciation problem.
 - Stress and rhythm are not scored yet, only the segments. The service estimates
   phone boundaries; reliable duration, energy and F0 assessment still needs validation.
   `parselmouth` is already a dependency but is not yet used.

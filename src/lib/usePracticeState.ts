@@ -17,7 +17,7 @@ import {
 import { getClip, listClips, putClip, pruneClips } from './clips.ts'
 import { stop as stopSpeaking } from './speech.ts'
 import {
-  aggregate, lineProgress, recentAverage, sameLine, sameScoringScale, SCORER_REVISION,
+  lineProgress, recentAverage, sameLine, sameScoringScale, SCORER_REVISION,
   toSentences,
   type Attempt,
 } from './practice.ts'
@@ -33,13 +33,16 @@ import {
 import { PHONES } from './phones.ts'
 import { contextsForWord } from './context.ts'
 import {
-  loadStruggles, saveStruggles, clearStruggles, recordWordReports, removeStruggledWord,
-  togglePinnedWord, addManualWord, syncStrugglesFromAttempts, isStrugglingLot,
+  loadStruggles, saveStruggles, clearStruggles, removeStruggledWord,
+  togglePinnedWord, addManualWord, isStrugglingLot,
   buildDrillForWord, buildDrillForStruggledWords, type StruggledWord,
 } from './struggles.ts'
 import { clearDailyState } from './daily.ts'
 import { playbackSlice } from './playback.ts'
 import { alignWordVariants } from './wordAlignment.ts'
+import { decisionsFor, emptyPracticePreferences, loadPracticePreferences, normalizeThreshold, savePracticePreferences,
+  soundPracticeStatus, soundScore, wordReviewKey, DEFAULT_PRACTICE_THRESHOLD, type ReviewChoice } from './practicePolicy.ts'
+import { isFirstPracticeTake, reviewHistory } from './practiceReviewHistory.ts'
 
 export interface PracticeProps {
   text: string
@@ -96,7 +99,13 @@ export function usePracticeState({
     | null
   >(null)
   const [stepAt, setStepAt] = useState(0)
-  const [struggles, setStruggles] = useState<StruggledWord[]>(() => loadStruggles())
+  const [savedStruggles, setStruggles] = useState<StruggledWord[]>(() => loadStruggles())
+  const [practicePreferences, setPracticePreferences] = useState(loadPracticePreferences)
+  const practiceThreshold = practicePreferences.threshold
+  useEffect(() => savePracticePreferences(practicePreferences), [practicePreferences])
+  const review = useMemo(() => reviewHistory(attempts, dict ?? new Map(), practicePreferences, savedStruggles), [attempts, dict, practicePreferences, savedStruggles])
+  const struggles = review.bank
+  const setPracticeThreshold = useCallback((value: number) => setPracticePreferences((old) => ({ ...old, threshold: normalizeThreshold(value) })), [])
   const [troubleFilter, setTroubleFilter] = useState<'all' | 'struggles' | 'pinned'>('all')
   const [troubleSearch, setTroubleSearch] = useState('')
   const [newWordInput, setNewWordInput] = useState('')
@@ -114,6 +123,8 @@ export function usePracticeState({
   const decoded = useRef<AudioBuffer | null>(null)
   const source = useRef<AudioBufferSourceNode | null>(null)
   const playbackGeneration = useRef(0)
+  const studioSession = useRef(crypto.randomUUID())
+  const recordingPractice = useRef<{ session: string; first?: boolean }>({ session: studioSession.current })
 
   const sentences = toSentences(text)
 
@@ -265,6 +276,19 @@ export function usePracticeState({
   const words = useMemo(() => wordsFor(target), [wordsFor, target])
   const expectedIPA = words.map((word) => word.ipa).join(' ')
   const report = useMemo(() => (aligned ? byWord(words, aligned) : []), [words, aligned])
+  const currentAttempt = editing === null ? undefined : attempts[editing]
+  const reviewChoices = useMemo(() => decisionsFor(currentAttempt, report, practicePreferences), [currentAttempt, report, practicePreferences])
+  const resolveWordReview = useCallback((index: number, choice?: ReviewChoice) => {
+    const word = report[index]
+    if (!currentAttempt || !word) return
+    const key = wordReviewKey(currentAttempt, word, index)
+    setPracticePreferences((old) => {
+      const decisions = { ...old.decisions }
+      if (choice) decisions[key] = choice
+      else delete decisions[key]
+      return { ...old, decisions }
+    })
+  }, [currentAttempt, report])
   const produced = useMemo(() => {
     if (!aligned || aligned.length === 0) return ''
     if (report.length > 0) {
@@ -316,35 +340,6 @@ export function usePracticeState({
     setOpened(worst)
   }, [report])
 
-  const updateStrugglesWithTake = useCallback(
-    (phrase: string, alignedResult: AlignedPhone[], at: number) => {
-      const w = wordsFor(phrase)
-      if (w.length === 0 || alignedResult.length === 0) return
-      const reports = byWord(w, alignedResult)
-      setStruggles((prev) => {
-        const next = recordWordReports(prev, reports, at, phrase)
-        saveStruggles(next)
-        return next
-      })
-    },
-    [wordsFor],
-  )
-
-  const syncedHistory = useRef(false)
-  useEffect(() => {
-    if (syncedHistory.current || attempts.length === 0 || !dict) return
-    syncedHistory.current = true
-    setStruggles((prev) => {
-      if (prev.length > 0) return prev
-      const seeded = syncStrugglesFromAttempts([], attempts, dict)
-      if (seeded.length > 0) {
-        saveStruggles(seeded)
-        return seeded
-      }
-      return prev
-    })
-  }, [attempts, dict])
-
   const stopLevelMeter = () => {
     window.clearInterval(levelTimer.current)
     setLevel(0)
@@ -361,6 +356,8 @@ export function usePracticeState({
       const durationMs = playback?.durationMs ?? existingDuration
       const existingMode = editing !== null ? attempts[editing]?.mode : undefined
       const attemptMode = existingMode ?? mode
+      const original = editing !== null ? attempts[editing] : undefined
+      const practiceMeta = { practiceSession: original?.practiceSession, practiceFirst: original?.practiceFirst }
 
       if (backend && expected.length > 0) {
         const blob = playback?.blob ?? (await getClip(at))?.blob
@@ -368,7 +365,6 @@ export function usePracticeState({
           try {
             const remote = await analyzeRemote(await decodeToMono16k(blob), expected, wordList)
             setAligned(remote.aligned)
-            updateStrugglesWithTake(phrase, remote.aligned, at)
             onAttempt(
               {
                 target: phrase,
@@ -379,6 +375,7 @@ export function usePracticeState({
                 rev: SCORER_REVISION,
                 durationMs,
                 mode: attemptMode,
+                ...practiceMeta,
               },
               editing ?? undefined,
             )
@@ -392,13 +389,12 @@ export function usePracticeState({
 
       const result = alignWordVariants(wordList, heard)
       setAligned(result)
-      updateStrugglesWithTake(phrase, result, at)
       onAttempt(
-        { target: phrase, aligned: result, score: scoreAlignment(result), at, scorer: 'browser', rev: SCORER_REVISION, durationMs, mode: attemptMode },
+        { target: phrase, aligned: result, score: scoreAlignment(result), at, scorer: 'browser', rev: SCORER_REVISION, durationMs, mode: attemptMode, ...practiceMeta },
         editing ?? undefined,
       )
     },
-    [heard, wordsFor, onAttempt, editing, attempts, backend, playback, updateStrugglesWithTake],
+    [heard, wordsFor, onAttempt, editing, attempts, backend, playback],
   )
 
   const migrated = useRef(false)
@@ -434,8 +430,9 @@ export function usePracticeState({
     }
   }
 
-  const beginRecording = useCallback(async () => {
+  const beginRecording = useCallback(async (practiceContext?: { session: string; first?: boolean }) => {
     silence()
+    recordingPractice.current = practiceContext ?? { session: studioSession.current }
     setError(null)
     try {
       await recorder.current.start()
@@ -482,6 +479,8 @@ export function usePracticeState({
         setTarget(phrase)
       }
 
+      const practiceMeta = { practiceSession: recordingPractice.current.session,
+        practiceFirst: recordingPractice.current.first ?? isFirstPracticeTake(attempts, recordingPractice.current.session, phrase) }
       if (backend) {
         const wordList = wordsFor(phrase)
         const wantedList = flatten(wordList)
@@ -497,7 +496,6 @@ export function usePracticeState({
 
         const at = Date.now()
         setAligned(remote.aligned)
-        updateStrugglesWithTake(phrase, remote.aligned, at)
         setPhase('done')
         setPlayback({ url: taken.url, durationMs: taken.durationMs, blob: taken.blob })
         setEditing(attempts.length)
@@ -513,6 +511,7 @@ export function usePracticeState({
           rev: SCORER_REVISION,
           durationMs: taken.durationMs,
           mode,
+          ...practiceMeta,
         })
         return
       }
@@ -548,7 +547,6 @@ export function usePracticeState({
       const wordList = wordsFor(phrase)
       const result = alignWordVariants(wordList, said)
       setAligned(result)
-      updateStrugglesWithTake(phrase, result, at)
       setPhase('done')
 
       setPlayback({ url: taken.url, durationMs: taken.durationMs, blob: taken.blob })
@@ -566,12 +564,13 @@ export function usePracticeState({
         rev: SCORER_REVISION,
         durationMs: taken.durationMs,
         mode,
+        ...practiceMeta,
       })
     } catch (err) {
       setError(`Analysis failed: ${(err as Error).message}`)
       setPhase('idle')
     }
-  }, [mode, target, wordsFor, onAttempt, attempts.length, backend, updateStrugglesWithTake])
+  }, [mode, target, wordsFor, onAttempt, attempts, backend])
 
   useEffect(() => () => {
     stopLevelMeter()
@@ -597,6 +596,7 @@ export function usePracticeState({
         setStruggles([])
         clearStruggles()
         clearDailyState()
+        setPracticePreferences(emptyPracticePreferences())
       }
     },
     [onClearHistory],
@@ -786,7 +786,7 @@ export function usePracticeState({
       e?.preventDefault()
       const query = newWordInput.trim()
       if (!query || !dict) return
-      const next = addManualWord(struggles, query, dict)
+      const next = addManualWord(savedStruggles, query, dict)
       if (!next) {
         setNewWordError(`“${query}” was not found in the pronunciation dictionary.`)
         return
@@ -795,22 +795,28 @@ export function usePracticeState({
       setNewWordInput('')
       setNewWordError(null)
     },
-    [newWordInput, struggles, dict],
+    [newWordInput, savedStruggles, dict],
   )
 
   const removeWord = useCallback((wordKey: string) => {
     setStruggles((prev) => removeStruggledWord(prev, wordKey))
+    setPracticePreferences((old) => ({ ...old, dismissedBefore: { ...old.dismissedBefore, [wordKey]: Date.now() } }))
   }, [])
 
   const togglePin = useCallback((wordKey: string) => {
-    setStruggles((prev) => togglePinnedWord(prev, wordKey))
-  }, [])
+    setStruggles((prev) => {
+      const existing = prev.find((word) => word.word === wordKey)
+      const active = struggles.find((word) => word.word === wordKey)
+      return togglePinnedWord(existing || !active ? prev : [...prev, { ...active, pinned: false }], wordKey)
+    })
+  }, [struggles])
 
   const clearTroubles = useCallback(() => {
     if (struggles.length === 0) return
     if (!window.confirm(`Clear all ${struggles.length} words from your Trouble Words Bank?`)) return
     setStruggles([])
     saveStruggles([])
+    setPracticePreferences((old) => ({ ...old, dismissedBefore: { ...old.dismissedBefore, '*': Date.now() } }))
   }, [struggles.length])
 
   const visibleStruggles = useMemo(() => {
@@ -832,15 +838,15 @@ export function usePracticeState({
 
   const score = aligned ? scoreAlignment(aligned) : null
   const line = lineProgress(attempts, target)
-  const weak = aggregate(attempts).filter((s) => s.errorRate > 0.15).slice(0, 4)
+  const weak = review.weak.slice(0, 4)
   const average = recentAverage(attempts)
 
   const step = session?.steps[stepAt] ?? null
   const onStep = !!step && sameLine(step.phrase.text, target)
   const focus = useMemo(
     () =>
-      aligned && step && onStep ? focusScore(aligned, step.covers.map((hit) => hit.phone)) : [],
-    [aligned, step, onStep],
+      aligned && step && onStep ? focusScore(aligned, step.covers.map((hit) => hit.phone), practiceThreshold) : [],
+    [aligned, step, onStep, practiceThreshold],
   )
 
   const wanted = picked ?? weak.map((stat) => stat.phone)
@@ -893,6 +899,7 @@ export function usePracticeState({
     handleAddWord, removeWord, togglePin, clearTroubles, toggleSound,
     display,
     attempts,
+    practiceThreshold, setPracticeThreshold, reviewChoices, resolveWordReview, reviewPatterns: review,
   }
 }
 
@@ -921,27 +928,23 @@ export function changeOf(delta: number): string {
   return delta > 0 ? 'up' : delta < 0 ? 'down' : 'level'
 }
 
-export function band(score: number): string {
-  return score >= 85 ? 'good' : score >= 65 ? 'ok' : 'poor'
+export function band(score: number, threshold = DEFAULT_PRACTICE_THRESHOLD): string {
+  return score >= threshold ? 'good' : 'poor'
 }
 
-export function tooltip(step: AlignedPhone): string {
-  if (step.verdict === 'missing') return `/${step.expected}/ was not pronounced`
-  if (step.verdict === 'extra') return `extra sound /${step.actual}/`
-  if (step.verdict === 'correct') return `/${step.expected}/ — correct`
-  return `/${step.expected}/ → /${step.actual}/: ${describeSubstitution(step.expected!, step.actual!)}`
+export function tooltip(step: AlignedPhone, threshold = DEFAULT_PRACTICE_THRESHOLD): string {
+  const score = soundScore(step)
+  if (score === null) return 'No reliable sound score; this does not establish an omission or insertion.'
+  return `/${step.expected}/: ${score}/100 · ${score < threshold ? 'below' : 'meets'} your ${threshold}-point practice threshold. Model estimate, not a correctness probability.`
 }
 
-export function notesFor(word: WordReport): string[] {
+export function notesFor(word: WordReport, threshold = DEFAULT_PRACTICE_THRESHOLD): string[] {
   return word.steps
-    .filter((s) => s.verdict === 'wrong' || s.verdict === 'missing' || s.verdict === 'close')
+    .filter((s) => soundPracticeStatus(s, threshold) === 'review')
     .sort((a, b) => (b.distance ?? 1) - (a.distance ?? 1))
     .slice(0, 3)
     .map((step) => {
-      if (step.verdict === 'missing') {
-        const info = PHONES[step.expected!]
-        return `You dropped /${step.expected}/${info ? ` (as in ${info.example})` : ''}.`
-      }
-      return `/${step.expected}/ came out as /${step.actual}/ — ${describeSubstitution(step.expected!, step.actual!)}.`
+      if (!step.actual || step.actual === step.expected) return `Review /${step.expected}/ (${soundScore(step)}/100) in context; the model's low score is not proof of an error.`
+      return `The model suggests /${step.actual}/ near the target /${step.expected}/. Check by listening: ${describeSubstitution(step.expected!, step.actual!)}.`
     })
 }

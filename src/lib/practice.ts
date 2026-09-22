@@ -2,9 +2,9 @@
  * Practice sessions: what was attempted, how it scored, and which sounds keep
  * going wrong across attempts.
  *
- * The per-phone tally is the part that answers "where am I weak" — a single
- * recording is noisy, but a consistent /θ/ → /s/ substitution across a dozen
- * attempts is a real habit worth naming.
+ * The legacy per-phone tally is descriptive model output, not human evidence.
+ * practiceReviewHistory.ts derives current practice flags from first takes.
+ * Even recurring flags may be systematic recognizer errors.
  */
 
 import { scoreAlignment, type AlignedPhone, type Score } from './align.ts'
@@ -45,6 +45,9 @@ export interface Attempt {
   durationMs?: number
   /** Recording mode: free speech vs scripted. */
   mode?: 'scripted' | 'free'
+  /** Practice provenance, independent of the acoustic scoring revision. */
+  practiceSession?: string
+  practiceFirst?: boolean
 }
 
 export function scorerOf(attempt: Attempt): Scorer {

@@ -10,6 +10,7 @@ import { flatten, targetWords } from './report.ts'
 import type { Voice } from './speech.ts'
 import { allowedDailyVoices, type VoicePreferences } from './voicePreferences.ts'
 import { dailySentences, resolveDailySentence, sentenceKey as key } from './dailySentences.ts'
+import type { ReviewChoice } from './practicePolicy.ts'
 
 export type RoutineKind = 'listening' | 'production' | 'transfer' | 'recall'
 export interface DailyPreferences {
@@ -49,6 +50,9 @@ export interface RoutineEvent {
   attemptAt?: number
   scorer?: string
   revision?: number
+  assessed?: boolean
+  practiceThreshold?: number
+  practicePolicyRevision?: number
   voiceURI?: string
   referenceHeard?: boolean
   fresh?: boolean
@@ -60,6 +64,9 @@ export interface DailyRoutine {
   cursor: number
   events: RoutineEvent[]
   notices: string[]
+  /** Scheduling choices are separate from immutable first-take scores and ratings. */
+  practiceReviews?: Record<string, ReviewChoice[]>
+  practiceReviewResolved?: Record<string, boolean>
 }
 
 const sample = <T,>(items: T[], random: () => number): T | undefined => items[Math.min(items.length - 1, Math.floor(random() * items.length))]
@@ -343,14 +350,25 @@ export function recordRoutineEvent(
 }
 
 const ratings: ReviewRating[] = ['again', 'hard', 'good', 'easy']
+export function recordRoutineReviewChoices(state: DailyState, sessionId: string, attemptAt: number, choices: (ReviewChoice | undefined)[], resolved = false): DailyState {
+  const session = state.sessions.find((s) => s.id === sessionId)
+  if (!session?.routine || session.endedAt || !session.routine.events.some((e) => e.attemptAt === attemptAt)) return state
+  const decisions = choices.filter((c): c is ReviewChoice => !!c)
+  const allResolved = decisions.length > 0 && resolved
+  if (JSON.stringify(session.routine.practiceReviews?.[attemptAt] ?? []) === JSON.stringify(decisions)
+    && !!session.routine.practiceReviewResolved?.[attemptAt] === allResolved) return state
+  return updateRoutine(state, sessionId, { ...session.routine, practiceReviews: { ...session.routine.practiceReviews, [attemptAt]: decisions },
+    practiceReviewResolved: { ...session.routine.practiceReviewResolved, [attemptAt]: allResolved } })
+}
 /** Listening can shorten an interval, but it can never prove speech production. */
-export function routineCardRating(events: RoutineEvent[]): ReviewRating | null {
+export function routineCardRating(events: RoutineEvent[], choices: Record<string, ReviewChoice[]> = {}, resolved: Record<string, boolean> = {}): ReviewRating | null {
   const first = events.filter((event) => event.first && event.status !== 'skipped')
-  const scored = first.filter((event) => event.status === 'scored' && event.rating)
+  const scored = first.filter((event) => event.status === 'scored' && event.rating && event.assessed !== false)
   if (!scored.length) return null
   const independent = scored.filter((event) => (event.kind === 'transfer' && event.fresh || event.kind === 'recall') && !event.referenceHeard)
   const evidence = independent.length ? independent : scored
-  let rating = Math.min(...evidence.map((event) => ratings.indexOf(event.rating!)))
+  let rating = Math.min(...evidence.map((event) => ratings.indexOf(event.attemptAt && choices[event.attemptAt]?.length
+    && resolved[event.attemptAt] ? 'hard' : event.rating!)))
   // Rehearsal without an independent check remains a conservative review.
   if (!independent.length || first.some((event) => event.kind === 'listening' && event.correct === false)) rating = Math.min(rating, 1)
   return ratings[Math.max(0, rating)]
@@ -362,18 +380,19 @@ function scheduleRoutineTarget(state: DailyState, sessionId: string, cardId: str
   const card = state.cards.find((item) => item.id === cardId)
   if (!session?.routine || !card) return state
   const events = session.routine.events.filter((event) => event.cardId === card.id)
-  const rating = routineCardRating(events)
+  const rating = routineCardRating(events, session.routine.practiceReviews, session.routine.practiceReviewResolved)
   const alreadyReviewed = state.reviews.some((review) => review.cardId === card.id && localDateKey(review.reviewedAt) === localDateKey(now))
   if (!rating || alreadyReviewed) return state
   const scheduled = scheduleDailyCard(card, rating, now)
   const scored = events.filter((event) => event.first && event.status === 'scored')
+  const manualReview = scored.some((event) => event.attemptAt && session.routine!.practiceReviews?.[event.attemptAt]?.length)
   const last = scored[scored.length - 1]
   const id = `${session.id}:review:${card.id}`
   return {
     ...state,
     cards: state.cards.map((item) => item.id === card.id ? {
       ...card, ...scheduled, totalReviews: card.totalReviews + 1,
-      successfulReviews: card.successfulReviews + Number(rating !== 'again'),
+      successfulReviews: card.successfulReviews + Number(rating !== 'again' && !manualReview),
       lastReviewedAt: now, lastPrompt: last.prompt, lastRating: rating,
       lastScore: last.focusScore ?? last.overallScore,
       promptHistory: [...(card.promptHistory ?? []), ...scored.map((event) => event.prompt)].slice(-8),
@@ -416,7 +435,7 @@ export function routineSummary(sessions: DailySession[], date?: string) {
   const first = events.filter((event) => event.first && event.status !== 'skipped')
   const listening = first.filter((event) => event.kind === 'listening' && event.status === 'answered')
   const measure = (kind: RoutineKind) => {
-    const results = first.filter((event) => event.kind === kind && event.status === 'scored'
+    const results = first.filter((event) => event.kind === kind && event.status === 'scored' && event.assessed !== false
       && (kind !== 'transfer' || event.fresh) && (kind === 'production' || !event.referenceHeard))
     const scales = new Set(results.map((event) => `${event.scorer ?? 'browser'}:${event.revision ?? 0}`))
     return { count: results.length, mixed: scales.size > 1, average: results.length && scales.size === 1

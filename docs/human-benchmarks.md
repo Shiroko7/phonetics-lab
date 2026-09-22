@@ -124,8 +124,8 @@ Limitations:
 - No human boundary timings: neighboring-word leakage and clipped target sounds
   remain unmeasured. The original word-cutting complaint is not declared solved.
 - No predicted fluency, stress or prosody yet; their measured coverage is zero.
-- Phone ratings are retained for future adapters, but app and corpus phone sequences
-  are not assumed to have matching slots. No phoneme-level metric is reported yet.
+- The original sentence/word runner does not match phone slots. The separate
+  conservative adapter below now evaluates only an exact-match phone subset.
 - This uses original WAV audio, not microphone capture through the browser's codec.
   The browser fallback is also not evaluated by this runner.
 - No confidence intervals or significance claims yet. Bootstrap by speaker when
@@ -154,7 +154,7 @@ Limitations:
    app scores, retaining disagreement and adjudication. No need to annotate all English.
 4. **Compare candidates.** Run the existing scorer and alternative aligners/scorers
    on the same frozen data and coverage. Add speaker-bootstrap intervals, full
-   model provenance and phone-slot adapters. Only then choose replacements or fit
+   model provenance and broader validated phone-slot mappings. Only then choose replacements or fit
    calibration on the development partition—not the final test.
 5. **Expand sentence practice separately.** Use a spoken-frequency inventory to
    audit original practice sentences, contextual word/phone coverage and repetition.
@@ -170,3 +170,60 @@ Limitations:
 
 Completion requires evidence for both assessment and boundaries on relevant speakers,
 not merely a functioning downloader or a large number of available recordings.
+
+## Phone-flag pilot
+
+Added 2026-09-22. This is an offline replay of the second archived 100-recording run
+(`2026-09-22T18-28-03-572Z`), not a new acoustic model run. It uses the previously
+chosen user preference of 80; neither scores nor thresholds were fitted to this set.
+
+The [pinned corpus rubric](https://github.com/jimbozhang/speechocean762/tree/613968e3b0b789fc33936fb5eba1973176ba7d11#phoneme-level)
+distinguishes correct (2), correct with heavy accent (1), and incorrect/missed (0).
+For this diagnostic, a **human concern** means at least three of five experts marked
+0. Heavy accent alone is not a positive error label. A model flag is strictly below
+80. This binary rubric is our explicit evaluation choice, not a claim that the corpus
+publisher recommends an 80-point app cutoff.
+
+Mapping requires identical word order/text, complete identical ARPAbet→IPA canonical
+sequences, explicitly matching realized phones, valid word timing and distinct phone
+intervals. It never uses greedy edit-distance alignment to fabricate slot identities.
+All five annotation strings must parse exactly against the reference, retaining
+accent/error distinctions; bracketed insertions are counted but not evaluated.
+
+| Measurement | Result |
+| --- | --- |
+| Eligible / scored phone slots | 1,883 / 1,188 |
+| Mapping coverage | 63.1% |
+| Canonical-sequence mismatch exclusions | 631 |
+| Different/unspecified realization exclusions | 40 |
+| Shared/overlapping phone-span exclusions | 24 |
+| Majority-human concerns in mapped subset | 57 |
+| Flagged human concerns / missed concerns | 51 / 6 |
+| Flags without majority-human concern / unflagged negatives | 260 / 871 |
+| Flag precision / concern recall | 16.4% / 89.5% |
+| False-positive rate among human negatives | 23.0% |
+| Phone Pearson / Spearman correlation | 0.437 / 0.406 |
+
+This is not end-to-end detector accuracy: 36.9% of slots were excluded, possibly
+systematically. Some flags without majority-error consensus can be accent-only
+concerns or rater disagreements; they are not all necessarily meaningless. Nevertheless,
+these results do not support “below 80 means definitely wrong.” Use it as a review
+prompt, with listening, undo and recurring-context evidence. Per-phone support and
+counts are included in the local JSON, not promoted into reliable per-sound claims
+from small samples. Correlation is not a correctness probability.
+
+The same Mandarin-L1, read-speech, child/adult, exposed-test and provenance limitations
+apply. No boundary accuracy, calibrated uncertainty or confidence intervals are
+established. Distinct estimated intervals do not make those intervals human truth.
+
+To reproduce, substitute your own existing archived run directory:
+
+```powershell
+npm run benchmark:phones -- datasets/speechocean762/613968e3b0b789fc33936fb5eba1973176ba7d11/test-100.jsonl datasets/speechocean762/613968e3b0b789fc33936fb5eba1973176ba7d11/runs/2026-09-22T18-28-03-572Z/raw.jsonl datasets/speechocean762/613968e3b0b789fc33936fb5eba1973176ba7d11/runs/2026-09-22T18-28-03-572Z/phone-flags-80.json
+```
+
+Use a new output filename if it already exists; the command refuses overwrites.
+It verifies the archived run's gold hash and raw ID list and records the input,
+run-manifest and adapter hashes. Data, raw responses and reports stay ignored under
+`datasets/`; no corpus audio or labels are committed. `npm run check` exercises the
+adapter only with authored synthetic fixtures and requires no corpus download.

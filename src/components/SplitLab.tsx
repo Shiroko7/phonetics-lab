@@ -401,6 +401,8 @@ export function SplitLab({
 
       {/* SETTINGS DRAWER */}
       <SettingsDrawer
+        practiceThreshold={practice.practiceThreshold}
+        onPracticeThreshold={practice.setPracticeThreshold}
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         display={display}

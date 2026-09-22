@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dictionary } from '../lib/dict.ts'
-import { dominant, focusScore } from '../lib/report.ts'
+import { dominant } from '../lib/report.ts'
+import { PRACTICE_POLICY_REVISION, soundScore, wordPracticeStatus } from '../lib/practicePolicy.ts'
 import { automaticDailyOutcome } from '../lib/dailyDecision.ts'
 import {
   cardIdForSound, cardIdForWord, findOpenSession, formatDue, loadDailyState,
@@ -9,7 +10,7 @@ import {
 } from '../lib/daily.ts'
 import {
   advanceRoutine, changeRoutineVoice, exposeRoutineStep, markReferenceHeard, planDailyRoutine, refreshLegacyContexts, refreshRoutineVoices,
-  recordRoutineEvent, referenceVoicePool, refreshRoutineSentences, routineSummary, updateRoutine,
+  recordRoutineEvent, recordRoutineReviewChoices, referenceVoicePool, refreshRoutineSentences, routineSummary, updateRoutine,
   type RoutineEvent, type RoutineKind,
 } from '../lib/dailyRoutine.ts'
 import { listVoices, onVoicesReady, stop, synthesise, type Voice } from '../lib/speech.ts'
@@ -44,9 +45,10 @@ function buildCandidates(practice: PracticeState): CardCandidate[] {
 
 function focusPercent(card: DailyCard, practice: PracticeState): number | undefined {
   if (!practice.aligned) return undefined
-  const reports = focusScore(practice.aligned, card.focusPhones)
-  const seen = reports.reduce((sum, report) => sum + report.seen, 0)
-  return seen ? Math.round(reports.reduce((sum, report) => sum + report.right + report.close * 0.5, 0) / seen * 100) : undefined
+  const values = practice.report.filter((w) => wordPracticeStatus(w, practice.practiceThreshold) !== 'unscored')
+    .flatMap((w) => w.steps.filter((s) => s.expected && card.focusPhones.includes(s.expected)).map(soundScore))
+    .filter((n): n is number => n !== null)
+  return values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : undefined
 }
 
 function eventLabel(event: RoutineEvent): string {
@@ -152,13 +154,21 @@ export function DailyPractice({ practice, dict }: Props) {
     if (!scoredHere || !session || !step || !currentCard || !practice.score || practice.editing === null) return
     const attempt = practice.attempts[practice.editing]
     if (!attempt || attempt.target !== step.prompt) return
-    const outcome = automaticDailyOutcome(currentCard.focusPhones, practice.aligned, practice.score, practice.report)
+    const outcome = automaticDailyOutcome(currentCard.focusPhones, practice.aligned, practice.score, practice.report, practice.practiceThreshold)
     mutate((state) => recordRoutineEvent(state, session.id, {
       stepId: step.id, at: Date.now(), status: 'scored', attemptAt: attempt.at,
       overallScore: practice.score!.overall, focusScore: focusPercent(currentCard, practice),
       rating: outcome.rating, scorer: attempt.scorer ?? 'browser', revision: attempt.rev,
+      assessed: outcome.assessed, practiceThreshold: practice.practiceThreshold, practicePolicyRevision: PRACTICE_POLICY_REVISION,
     }))
   }, [scoredHere, session?.id, step?.id, practice.editing, practice.attempts, practice.score?.overall, mutate])
+  const reviewSignature = JSON.stringify(practice.reviewChoices)
+  useEffect(() => {
+    if (!scoredHere || !session || !currentCard || practice.editing === null) return
+    const attempt = practice.attempts[practice.editing]
+    const reviewed = automaticDailyOutcome(currentCard.focusPhones, practice.aligned, practice.score, practice.report, practice.practiceThreshold, practice.reviewChoices)
+    if (attempt) mutate((state) => recordRoutineReviewChoices(state, session.id, attempt.at, practice.reviewChoices, !reviewed.retry))
+  }, [scoredHere, session?.id, practice.editing, practice.aligned, reviewSignature, practice.practiceThreshold, mutate])
 
   const playReference = (text = step?.prompt ?? '', feedback = false) => {
     if (!step || !session || !voiceURI || lockedReference) return
@@ -222,7 +232,7 @@ export function DailyPractice({ practice, dict }: Props) {
     if (!step) return
     silence()
     recordingStep.current = step.id
-    void practice.beginRecording()
+    void practice.beginRecording({ session: session!.id, first: !firstEvent })
   }
   const answer = (choice: number) => {
     if (!step || !session || firstEvent || !step.referenceHeard || speaking) return
@@ -262,7 +272,7 @@ export function DailyPractice({ practice, dict }: Props) {
     setMessage(`${texts.length === 1 ? 'Sentence blacklisted. It' : 'Sentences blacklisted. They'} will no longer appear in Daily Practice. You can restore ${texts.length === 1 ? 'it' : 'them'} in Blacklisted sentences.`)
   }
   const summary = routineSummary(daily.sessions, today)
-  const outcome = scoredHere && currentCard ? automaticDailyOutcome(currentCard.focusPhones, practice.aligned, practice.score, practice.report) : null
+  const outcome = scoredHere && currentCard ? automaticDailyOutcome(currentCard.focusPhones, practice.aligned, practice.score, practice.report, practice.practiceThreshold, practice.reviewChoices) : null
   const historyDates = [...new Set([today, ...daily.sessions.map((item) => item.dateKey),
     ...daily.sessions.flatMap((item) => item.routine?.events.map((event) => localDateKey(event.at)) ?? [])])].sort().reverse().slice(0, 14)
   const due = daily.cards.filter((card) => card.state !== 'suspended' && card.dueAt <= Date.now()).length
