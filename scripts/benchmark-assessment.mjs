@@ -8,6 +8,7 @@ import { wordPronunciations } from '../src/lib/wordAlignment.ts'
 import { decodeAnalysisResponse, ANALYSIS_REVISION } from '../src/lib/backend.ts'
 import { ROOT, CORPUS, spec, sha256, readJsonl, jsonl, atomicWrite } from './prepare-speechocean.mjs'
 import { evaluateAssessment } from './evaluate-assessment.mjs'
+import { assertNotReserved, loadSelection } from './benchmark-splits.mjs'
 
 export function localEndpoint(endpoint) {
   const url = new URL(endpoint)
@@ -34,7 +35,7 @@ export function validateResponse(body, expected) {
 
 /** Hash working-tree bytes, not just HEAD: uncommitted scoring changes must be distinguishable. */
 async function sourceFingerprint() {
-  const paths = ['scripts/benchmark-assessment.mjs', 'scripts/evaluate-assessment.mjs', 'scripts/prepare-speechocean.mjs', 'backend/uv.lock', 'package-lock.json']
+  const paths = ['scripts/benchmark-assessment.mjs', 'scripts/benchmark-splits.mjs', 'scripts/evaluate-assessment.mjs', 'scripts/prepare-speechocean.mjs', 'scripts/speechocean.json', 'backend/uv.lock', 'package-lock.json']
   for (const [dir, extension] of [['src/lib', '.ts'], ['backend/app', '.py']]) {
     for (const name of await readdir(resolve(ROOT, dir))) if (name.endsWith(extension)) paths.push(`${dir}/${name}`)
   }
@@ -43,18 +44,20 @@ async function sourceFingerprint() {
   return { files, sha256: sha256(JSON.stringify(files)) }
 }
 
-export async function runBenchmark({ limit = 100, endpoint = 'http://127.0.0.1:8000' } = {}) {
+export async function runBenchmark({ limit = 100, endpoint = 'http://127.0.0.1:8000', partition } = {}) {
   assert(Number.isInteger(limit) && limit > 0 && limit <= 2500, 'Limit must be 1–2500')
   const base = localEndpoint(endpoint)
-  const goldPath = resolve(CORPUS, `test-${limit}.jsonl`)
-  const gold = await readJsonl(goldPath)
-  const manifest = JSON.parse(await readFile(resolve(CORPUS, `test-${limit}.manifest.json`), 'utf8'))
+  const selection = partition ? await loadSelection(partition, limit) : null
+  const goldPath = selection?.goldPath ?? resolve(CORPUS, `test-${limit}.jsonl`)
+  const gold = selection?.gold ?? await readJsonl(goldPath)
+  const manifest = selection?.manifest ?? JSON.parse(await readFile(resolve(CORPUS, `test-${limit}.manifest.json`), 'utf8'))
   assert.equal(manifest.resource.revision, spec.revision)
   assert.equal(manifest.goldSha256, sha256(await readFile(goldPath)), 'Gold selection changed; prepare it again')
   assert.equal(gold.length, limit)
   assert.deepEqual(manifest.ids, gold.map((r) => r.id))
+  await assertNotReserved(gold)
   // Validate all gold labels before any inference; an empty prediction set yields zero coverage.
-  evaluateAssessment(gold, [])
+  evaluateAssessment(gold, [], { split: partition ?? 'test' })
   const health = async () => {
     const r = await fetch(`${base}/health`, { redirect: 'error', signal: AbortSignal.timeout(10_000) })
     assert(r.ok, `Health check failed: ${r.status}`)
@@ -129,7 +132,7 @@ export async function runBenchmark({ limit = 100, endpoint = 'http://127.0.0.1:8
   for (const prediction of predictions) prediction.revision = revision
   await atomicWrite(resolve(runPath, 'predictions.jsonl'), jsonl(predictions))
   await atomicWrite(resolve(runPath, 'run.json'), JSON.stringify({ ...provenance, backendAfter: after, revision, completedAt: new Date().toISOString() }, null, 2) + '\n')
-  const report = evaluateAssessment(gold, predictions)
+  const report = evaluateAssessment(gold, predictions, { split: partition ?? 'test' })
   await writeFile(resolve(runPath, 'report.json'), JSON.stringify(report, null, 2) + '\n', { flag: 'wx' })
   console.log(JSON.stringify(report, null, 2))
   console.log(`Local report: ${resolve(runPath, 'report.json')}`)
@@ -140,7 +143,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     const args = process.argv.slice(2), options = {}
     for (let i = 0; i < args.length; i += 2) {
-      assert(['--limit', '--endpoint'].includes(args[i]) && args[i + 1], 'Usage: npm run benchmark:run -- [--limit 100] [--endpoint http://127.0.0.1:8000]')
+      assert(['--limit', '--endpoint', '--partition'].includes(args[i]) && args[i + 1], 'Usage: npm run benchmark:run -- [--partition calibration] [--limit 100] [--endpoint http://127.0.0.1:8000]')
       options[args[i].slice(2)] = args[i] === '--limit' ? Number(args[i + 1]) : args[i + 1]
     }
     await runBenchmark(options)

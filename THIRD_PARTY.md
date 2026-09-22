@@ -92,8 +92,13 @@ Git tree. See [the benchmark guide](docs/human-benchmarks.md) and
   The implemented adapter retains author credit, source/revision links, the license
   link and a description of its selection/format changes. This data is not Apache-2.0.
 - [L2-ARCTIC](https://psi.engr.tamu.edu/l2-arctic-corpus/): CC BY-NC 4.0; provider
-  registration and agreement are required. The installer must not submit these for
-  a user or bypass them.
+  registration and agreement are required. The optional local-only
+  `benchmark:boundaries:import` adapter reads an already obtained manual subset;
+  it never downloads, registers or accepts terms on the user's behalf. The user
+  explicitly acknowledges reviewing the terms. Source/license hashes and attribution
+  stay in ignored `datasets/`, outside `public/` and builds. Keeping this data local
+  does not make it Apache-licensed or commercially cleared. See the
+  [import instructions and limits](docs/evaluation-foundation.md#manually-corrected-boundary-adapter).
 - [Buckeye](https://buckeyecorpus.osu.edu/): free for noncommercial use with provider
   registration. Keep outside the app and repository.
 - [Santa Barbara](https://linguistics.ucsb.edu/research/santa-barbara-corpus-spoken-american-english):

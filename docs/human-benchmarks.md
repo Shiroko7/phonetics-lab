@@ -3,6 +3,13 @@
 Updated 2026-09-22. Phase 1 is **in progress**, not complete. This adds evidence and
 reproducible tooling; it does not change the pronunciation-scoring algorithm.
 
+The [evaluation foundation](evaluation-foundation.md) now adds frozen speaker-disjoint
+partitions, a guarded final reservation, two additional 100-recording development
+baselines, separate accent/error phone rubrics, and a local manual-boundary adapter.
+This page retains the original pilot results; those speakers are now explicitly
+regression data, not an untouched final test. Full manual-boundary evaluation remains
+pending a legally obtained local corpus.
+
 ## What is working
 
 - An explicit downloader for [speechocean762](https://www.openslr.org/101/), rated
@@ -138,16 +145,17 @@ Limitations:
 
 ## Remaining milestone work, in order
 
-1. **Separate development from final testing.** Import the official training side
-   into speaker-disjoint training/calibration/validation partitions before fitting
-   thresholds. Keep this pilot as an exposed regression set; reserve additional
-   test speakers for a locked final comparison. Repeatedly inspecting test errors
-   makes the pilot unsuitable as an untouched final test, even without fitting.
-2. **Add boundary evidence.** Obtain a legally accessible, manually timed corpus
-   (e.g. registration-gated Buckeye or the annotated L2-ARCTIC subset) and adapt its
-   labels. Never call automatically generated alignments ground truth. Keep uncertain
-   boundaries and permitted timing ranges explicit. Evaluate both neighbor leakage
-   and target-speech clipping, alongside coverage and boundary error.
+1. **Development/final separation is implemented.** Official training speakers are
+   partitioned 75/25/25 into training/calibration/validation; the 100 exposed test
+   speakers are regression data and 25 test speakers remain reserved. Normal tools
+   refuse the final partition. Calibration and validation each have a measured
+   100-recording baseline, but no calibration is fitted. Repeatedly inspecting test
+   errors makes the old pilot unsuitable as an untouched final test.
+2. **Add real boundary evidence.** The local-only L2-ARCTIC manual-subset adapter and
+   evaluator now preserve independent pronunciation judgments, uncertainty ranges,
+   neighbor leakage and target clipping. Still obtain the corpus under its provider's
+   terms, inspect the import and run prediction comparisons. Tests of the adapter are
+   not human timing results. Never use the automatic `textgrid/` tier as human gold.
 3. **Add the personal pilot.** Collect 100–200 consented, pseudonymous recordings
    spanning connected speech, reductions, difficult boundaries, common contrasts,
    varied rates and devices, plus native-US controls. Have two raters work blind to

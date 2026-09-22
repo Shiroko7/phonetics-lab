@@ -72,7 +72,9 @@ assert.throws(() => evaluateAssessment([...gold, gold[0]], predictions), /Duplic
 assert.throws(() => evaluateAssessment(gold, [...predictions, predictions[0]]), /Duplicate/)
 assert.throws(() => evaluateAssessment(gold, [{ ...predictions[0], id: 'unknown' }]), /Unknown/)
 assert.throws(() => evaluateAssessment([{ ...gold[0], source: 'human' }, gold[1]], predictions), /separate/)
-assert.throws(() => evaluateAssessment([{ ...gold[0], split: 'train' }, gold[1]], predictions), /held-out/)
+assert.throws(() => evaluateAssessment([{ ...gold[0], split: 'train' }, gold[1]], predictions), /partition/)
+assert.equal(evaluateAssessment(gold.map(r => ({ ...r, split: 'calibration' })), predictions, { split: 'calibration' }).split, 'calibration')
+assert.throws(() => evaluateAssessment(gold, predictions, { split: 'final' }), /locked/)
 assert.throws(() => evaluateAssessment(gold, [predictions[0], { ...predictions[1], revision: '2' }]), /revisions/)
 assert.throws(() => evaluateAssessment(gold, [{ ...predictions[0], datasetRevision: 'changed' }]), /corpus revision/)
 for (const edit of [

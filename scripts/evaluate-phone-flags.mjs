@@ -38,8 +38,21 @@ function summarize(pairs, threshold) {
     spearman: pearson(ranks(pairs.map(p => p.score)), ranks(pairs.map(p => p.human))),
     unanimousHumanSlots: pairs.filter(p => p.unanimous).length }
 }
+function summarizeRubrics(pairs, threshold) {
+  const subset = (category) => pairs.filter(p => p.category === category)
+  return {
+    majorityIncorrectOrMissed: summarize(pairs, threshold),
+    // Alternate target explicitly includes heavy-accent annotations; never call these all wrong sounds.
+    majorityAccentOrError: summarize(pairs.map(p => ({ ...p, concern: p.nonPerfectMajority })), threshold),
+    humanCategories: Object.fromEntries(['incorrectOrMissed', 'heavyAccent', 'correct', 'noCategoryMajority'].map(category => {
+      const items = subset(category), flagged = items.filter(p => p.score < threshold).length
+      return [category, { slots: items.length, flagged, flagRate: ratio(flagged, items.length) }]
+    })),
+  }
+}
 
-export function evaluatePhoneFlags(gold, raw, threshold = 80) {
+export function evaluatePhoneFlags(gold, raw, threshold = 80, { split = 'test' } = {}) {
+  assert(['test', 'training', 'calibration', 'validation', 'regression'].includes(split), 'Unknown evaluation partition; final is locked')
   assert(Number.isInteger(threshold) && threshold >= 0 && threshold <= 100, 'Threshold must be an integer 0–100')
   assert(Array.isArray(gold) && gold.length && Array.isArray(raw), 'Nonempty gold and response arrays required')
   const ids = new Set(gold.map(r => r.id)), byId = new Map(raw.map(r => [r.id, r]))
@@ -55,7 +68,7 @@ export function evaluatePhoneFlags(gold, raw, threshold = 80) {
   let eligible = 0, insertedAnnotations = 0
   const exclude = (reason, count) => { excluded[reason] = (excluded[reason] ?? 0) + count }
   for (const row of gold) {
-    assert(row.id && row.speaker && row.split === 'test' && row.dataset && row.datasetRevision, 'Missing held-out provenance')
+    assert(row.id && row.speaker && row.split === split && row.dataset && row.datasetRevision, 'Missing declared-partition provenance')
     assert(Array.isArray(row.words) && row.words.length, 'Missing word annotations')
     const response = byId.get(row.id)
     let reports, phones
@@ -99,20 +112,28 @@ export function evaluatePhoneFlags(gold, raw, threshold = 80) {
         const value = soundScore(reports[wi].steps[pi])
         if (value === null) { exclude('unscoredPhone', 1); return }
         const labels = annotations.map(a => a.labels[pi])
+        const counts = [0, 1, 2].map(value => labels.filter(n => n === value).length)
         pairs.push({ id: row.id, speaker: row.speaker, word: wi, slot: pi, phone: expected[pi], score: value,
-          human: word.phoneAccuracy[pi], concern: labels.filter(n => n === 0).length >= 3,
+          human: word.phoneAccuracy[pi], concern: counts[0] >= 3, nonPerfectMajority: counts[0] + counts[1] >= 3,
+          category: counts[0] >= 3 ? 'incorrectOrMissed' : counts[1] >= 3 ? 'heavyAccent' : counts[2] >= 3 ? 'correct' : 'noCategoryMajority',
           unanimous: labels.every(n => n === labels[0]) })
       })
     })
   }
   assert.equal(pairs.length + Object.values(excluded).reduce((a, b) => a + b, 0), eligible)
-  return { schemaVersion: 1, adapter: 'exact-canonical-distinct-span-v1', annotationSource: [...sources][0],
+  return { schemaVersion: 2, split, adapter: 'exact-canonical-distinct-span-v1', annotationSource: [...sources][0],
     dataset: [...datasets][0], scorerRevision: [...revisions][0] ?? null, threshold,
     rubric: 'Human concern = at least 3 of 5 experts mark incorrect/missed (0). Heavy accent (1) is not an error. Model flag = score strictly below threshold.',
     recordings: gold.length, speakers: new Set(gold.map(r => r.speaker)).size,
     eligible, scored: pairs.length, coverage: ratio(pairs.length, eligible), excluded,
     insertionAnnotationsNotEvaluated: insertedAnnotations, metrics: summarize(pairs, threshold),
-    byPhone: Object.fromEntries([...new Set(pairs.map(p => p.phone))].sort().map(p => [p, summarize(pairs.filter(item => item.phone === p), threshold)])),
+    rubrics: summarizeRubrics(pairs, threshold),
+    rubricDefinitions: { majorityIncorrectOrMissed: 'At least 3/5 raters mark 0.', majorityAccentOrError: 'At least 3/5 raters mark either 0 or 1; an accent/quality target, not solely error detection.',
+      humanCategories: 'Separate exact-category majority (0, 1 or 2); otherwise no category majority. Never force a tie into correct.' },
+    byPhone: Object.fromEntries([...new Set(pairs.map(p => p.phone))].sort().map(p => {
+      const items = pairs.filter(item => item.phone === p)
+      return [p, { ...summarize(items, threshold), rubrics: summarizeRubrics(items, threshold) }]
+    })),
     caveats: [
       'Partial exact-match subset, not an end-to-end detector evaluation. Excluded errors may differ systematically.',
       'No human boundaries. Distinct model spans are a mapping safeguard, not validated timing.',
@@ -133,7 +154,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     assert.equal(sha256(goldBytes), run.dataset.goldSha256, 'Gold differs from archived scoring run')
     const gold = await readJsonl(goldPath), raw = await readJsonl(rawPath)
     assert.deepEqual(raw.map(r => r.id), run.dataset.ids, 'Archived raw IDs differ from run manifest')
-    const report = evaluatePhoneFlags(gold, raw, Number(cutoff))
+    const report = evaluatePhoneFlags(gold, raw, Number(cutoff), { split: run.dataset.partition ?? 'test' })
     report.provenance = { runRevision: run.revision, goldSha256: sha256(goldBytes), rawSha256: sha256(rawBytes),
       runSha256: sha256(await readFile(runPath)), adapterSha256: sha256(await readFile(fileURLToPath(import.meta.url))),
       derivedAt: new Date().toISOString(), mode: 'Offline replay of archived model outputs; no model rerun or calibration.' }

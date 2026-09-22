@@ -47,6 +47,14 @@ Revision 2 is a reliability baseline, not a validated accuracy improvement on hu
   five-rater annotations. The 80-point pilot has 63.1% mapping coverage and substantial
   disagreement with majority-human incorrect/missed labels; details and exclusions
   are in the [phone benchmark](human-benchmarks.md#phone-flag-pilot).
+- Frozen speaker-disjoint training/calibration/validation partitions, an exposed
+  regression set and a guarded final reservation. New 100-recording calibration and
+  validation baselines separate incorrect/missed labels, accent-sensitive labels and
+  fully-correct flags. No calibration has been fitted or final holdout scored.
+- A local-only L2-ARCTIC manual-boundary importer and an evaluator that separates
+  acoustic estimates from playback, measures target clipping as well as neighbor
+  leakage, and retains human timing uncertainty. The adapter is tested; real manual
+  corpus evaluation is still pending. See [evaluation foundation](evaluation-foundation.md).
 
 Regression checks: `npm run check`, `make check-api`, and
 `node scripts/check-daily-browser.mjs` with the web server running. They use synthetic
@@ -83,7 +91,7 @@ original microphone signal. This limitation affects both backend and browser sco
 | Phase | Work | Evidence required to finish |
 | --- | --- | --- |
 | 0 — Reliability baseline | Changes listed above | Deterministic regressions, build and browser flow pass; limitations remain visible |
-| 1 — Human evaluation set | Collect representative recordings; annotate boundaries and pronunciation independently | Frozen pilot set, consent/provenance, adjudicated labels, held-out test split and baseline report |
+| 1 — Human evaluation set (in progress) | Speaker-disjoint protocol and assessment baselines implemented; manual-boundary adapter ready; representative recordings pending | Human timing measurements, consent/provenance, adjudicated representative labels and final held-out comparison still required |
 | 2 — Better word alignment | Compare current revision with MFA 3 US English and Qwen3-ForcedAligner; add alignment provenance/confidence to the API | Lower boundary error and neighboring-word leakage without hiding difficult cases or increasing clipped target sounds |
 | 3 — Pronunciation validity | Optional/deleted/inserted phones, contextual pronunciation paths, trained assessment and per-phone calibration | Better false-rejection/acceptance tradeoff on held-out human labels; explicit abstention and coverage; no regression on valid US variants |
 | 4 — Natural American speech | Stress, rhythm, intonation, sentence-matched reference excerpts and multiple US speakers | Separate human-rated prosody evaluation; repeatable coaching; no penalty for unrelated voice/pitch differences |
@@ -104,10 +112,16 @@ validation are still absent. No scoring thresholds were tuned on this pilot.
 Phone-level evaluation is now partial rather than absent; the new practice workflow
 is implemented, but phase 1's evidence gates and phase 3's validity gate remain open.
 
-Remaining phase-1 work includes development/calibration splits, manually timed
-evidence, representative personal/native-US recordings, independent adjudication,
-candidate comparisons and a locked final test. The guide also documents the parallel
-spoken-frequency, sentence-coverage and nonrepetition practice-library track.
+The [evaluation foundation](evaluation-foundation.md) now provides development/
+calibration/validation splits and a locked final reservation. Additional 100-recording
+calibration and validation runs cover separate 25-speaker groups; validation word
+Pearson correlation is 0.337, with substantial below-80 flags on human-correct sounds.
+This is a measured baseline, not improved scoring. The manual-boundary importer and
+uncertainty/clipping metrics are implemented but have not measured full-corpus human
+timing accuracy. Remaining phase-1 work includes those measurements, representative
+personal/native-US recordings, independent adjudication, candidate comparisons,
+confidence intervals and a frozen final comparison. The human-benchmark guide also
+documents the parallel spoken-frequency, sentence-coverage and nonrepetition track.
 
 Start with 100–200 short recordings as a pilot, including the user's problem cases and
 native American English controls. This is a starting regression corpus, not enough to
@@ -152,19 +166,24 @@ explicitly synthetic and must not be reported as a human benchmark.
 
 Predictions retain the same words even for omissions or unscored results. Use null
 timings for unavailable boundaries, and `correct: null` for an abstained judgment.
-When testing actual replay, supply the playback intervals, including any applied padding.
+Human gold also uses `correct: null` when pronunciation was not judged: boundary
+annotations do not imply a pronunciation grade. When testing actual replay, supply
+separate `playback: {start, end}` intervals, including any applied padding; omitted
+playback defaults to the acoustic estimate, and `playback: null` marks replay unavailable.
 
 ```json
 {"id":"fixture-1","scorer":"candidate-name","revision":"checkpoint-and-config","words":[{"text":"one","start":0.1,"end":0.31,"correct":true},{"text":"two","start":null,"end":null,"correct":null}]}
 ```
 
 The evaluator reports boundary mean and p95 error, boundaries within 20/50 ms,
-clips intersecting other annotated words, false acceptance/rejection and coverage.
+clips intersecting other annotated words, clipped target duration, separate timing/
+replay coverage, and false acceptance/rejection when human correctness was judged.
 Zero evaluated samples yield null error rates, not perfect results. Mixed engines,
-mixed human/synthetic labels, duplicate IDs and mismatched words are refused. The
-initial format requires adjudicated non-overlapping boundaries; exclude ambiguous
-items explicitly and report their count separately. Later extend it to boundary
-intervals, rater disagreement, phoneme-level error diagnosis and score correlation.
+mixed human/synthetic labels, duplicate IDs and mismatched words are refused.
+Optional human `startRange` / `endRange` bounds now preserve boundary uncertainty;
+unresolved/unavailable boundaries stay outside timing metrics with explicit coverage.
+Definite word cores must not overlap. See the foundation guide for bounds and schema.
+Pass an explicit third argument such as `validation` for development-corpus evaluation.
 
 Report both speech mistakenly included and target speech mistakenly cut off. Inspect
 the worst cases, not only the mean. Count unscored/uncertain results and compare engines

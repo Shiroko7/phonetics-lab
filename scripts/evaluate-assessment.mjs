@@ -44,7 +44,8 @@ function summarize(items) {
   }
 }
 
-export function evaluateAssessment(gold, predictions) {
+export function evaluateAssessment(gold, predictions, { split = 'test' } = {}) {
+  assert(['test', 'training', 'calibration', 'validation', 'regression'].includes(split), 'Unknown evaluation partition; final is locked')
   assert(Array.isArray(gold) && gold.length, 'A nonempty held-out set is required')
   assert(Array.isArray(predictions), 'Predictions must be an array')
   const ids = new Set(gold.map((r) => r.id)), byId = new Map(predictions.map((r) => [r.id, r]))
@@ -60,7 +61,7 @@ export function evaluateAssessment(gold, predictions) {
   const metrics = { sentenceAccuracy: [], wordAccuracy: [], sentenceFluency: [], sentenceProsody: [], wordStress: [] }
   const errors = {}
   for (const row of gold) {
-    assert(typeof row.id === 'string' && row.id && row.split === 'test' && typeof row.speaker === 'string' && row.speaker, 'Expected identified held-out test rows with speakers')
+    assert(typeof row.id === 'string' && row.id && row.split === split && typeof row.speaker === 'string' && row.speaker, 'Expected identified rows from the declared partition with speakers')
     assert(typeof row.dataset === 'string' && row.dataset && typeof row.datasetRevision === 'string' && row.datasetRevision, 'Missing dataset provenance')
     assert(Array.isArray(row.words) && row.words.length, 'Missing annotated words')
     const predicted = byId.get(row.id)
@@ -93,7 +94,7 @@ export function evaluateAssessment(gold, predictions) {
     })
   }
   return {
-    schemaVersion: 1, annotationSource: [...sources][0], dataset: [...datasets][0], scorer: [...engines][0] ?? null,
+    schemaVersion: 1, split, annotationSource: [...sources][0], dataset: [...datasets][0], scorer: [...engines][0] ?? null,
     recordings: gold.length, predictedRecordings: predictions.length, speakers: new Set(gold.map((r) => r.speaker)).size,
     metrics: Object.fromEntries(Object.entries(metrics).map(([key, pairs]) => [key, summarize(pairs)])),
     sentenceAccuracyByAge: {
@@ -114,7 +115,7 @@ export function evaluateAssessment(gold, predictions) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    assert(process.argv.length === 4, 'Usage: node scripts/evaluate-assessment.mjs GOLD.jsonl PREDICTIONS.jsonl')
-    console.log(JSON.stringify(evaluateAssessment(await readJsonl(process.argv[2]), await readJsonl(process.argv[3])), null, 2))
+    assert([4, 5].includes(process.argv.length), 'Usage: node scripts/evaluate-assessment.mjs GOLD.jsonl PREDICTIONS.jsonl [PARTITION]')
+    console.log(JSON.stringify(evaluateAssessment(await readJsonl(process.argv[2]), await readJsonl(process.argv[3]), { split: process.argv[4] ?? 'test' }), null, 2))
   } catch (err) { console.error(err.message); process.exitCode = 1 }
 }

@@ -73,6 +73,14 @@ human ratings. No paid/cloud scoring service is used. It is not part of app star
 or Daily practice. Scores, coverage and human disagreement are measured separately;
 this corpus cannot validate word-cut boundaries because it supplies no human timings.
 
+For new development work, use the [evaluation foundation guide](docs/evaluation-foundation.md):
+`npm run benchmark:splits` freezes speaker-disjoint training/calibration/validation
+groups and reserves unexposed final-test speakers. Explicit `--partition` options
+prepare and run development subsets without consuming that holdout. The guide also
+documents the new measured baselines, phone-rubric breakdown, and optional local
+L2-ARCTIC manual-boundary importer. Human word-cut measurements still require that
+separately obtained corpus; no aligner/scorer replacement is claimed yet.
+
 `make check` runs both regression suites, `make build` produces a static `dist/` you can
 host subject to its resources' terms. Vite includes the generated `public/dict/`
 files in `dist/`, so a local-only Git policy is not permission to redistribute a build.

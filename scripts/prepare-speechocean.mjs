@@ -57,14 +57,15 @@ function ratings(values) {
 const transcriptKey = (text) => text.replace(/[.,!?;:"]/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase()
 
 /** Keep published aggregates AND individual ratings; never infer timestamps or binary truth. */
-export function importCorpus(files, resource = spec) {
+export function importCorpus(files, resource = spec, subset = 'test') {
+  assert(['train', 'test'].includes(subset), 'Unknown official subset')
   const scores = JSON.parse(files['resource/scores.json'])
   const details = JSON.parse(files['resource/scores-detail.json'])
-  const texts = parseTable(files['test/text'])
-  const speakers = parseTable(files['test/utt2spk'])
-  const ages = parseTable(files['test/spk2age'])
-  const waves = parseTable(files['test/wav.scp'])
-  const training = parseTable(files['train/utt2spk'])
+  const texts = parseTable(files[`${subset}/text`])
+  const speakers = parseTable(files[`${subset}/utt2spk`])
+  const ages = parseTable(files[`${subset}/spk2age`])
+  const waves = parseTable(files[`${subset}/wav.scp`])
+  const training = parseTable(files[`${subset === 'test' ? 'train' : 'test'}/utt2spk`])
   const trainSpeakers = new Set(training.values())
   assert.equal(texts.size, speakers.size, 'Mismatched test metadata')
   assert.equal(texts.size, waves.size, 'Mismatched audio metadata')
@@ -79,7 +80,7 @@ export function importCorpus(files, resource = spec) {
     assert.equal(transcriptKey(s.words.map((w) => w.text).join(' ')), transcriptKey(text), `Word sequence mismatch: ${id}`)
     assert.equal(s.words.length, d.words.length, `Rater word count mismatch: ${id}`)
     return {
-      schemaVersion: 1, id, source: 'human', split: 'test', dataset: resource.id,
+      schemaVersion: 1, id, source: 'human', split: subset, dataset: resource.id,
       datasetRevision: resource.revision, speaker, age, text, audio: path,
       sentence: {
         accuracy: rating(s.accuracy), accuracyRaters: ratings(d.accuracy),
@@ -147,6 +148,8 @@ export async function prepareSpeechocean({ limit = 100, offline = false, log = c
   const all = importCorpus(files)
   assert.equal(all.length, 2500, 'The pinned official test set must contain 2500 recordings')
   const selected = selectPilot(all, limit)
+  const { assertNotReserved } = await import('./benchmark-splits.mjs')
+  await assertNotReserved(selected)
   log(`Selected ${limit} official test recordings from ${new Set(selected.map((r) => r.speaker)).size} speakers (label-blind pilot-v1).`)
   for (let i = 0; i < selected.length; i++) {
     const row = selected[i], blob = blobs.get(row.audio)
