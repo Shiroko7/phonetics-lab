@@ -145,7 +145,11 @@ export async function analyze(
   const res = await fetch(`${BASE}/analyze`, { method: 'POST', body: form })
   if (!res.ok) await fail(res)
 
-  const body = (await res.json()) as {
+  return decodeAnalysisResponse(await res.json(), !!words)
+}
+
+/** Shared by the browser and local benchmark runner; no second scoring formula. */
+export function decodeAnalysisResponse(body: {
     phones: {
       index: number; expected: string; verdict: Verdict; score: number
       gop: number; posterior: number; heard: string | null
@@ -156,9 +160,9 @@ export async function analyze(
     overall: number
     device: string
     revision?: number
-  }
+  }, structured = true): RemoteAnalysis {
 
-  if (words && body.revision !== ANALYSIS_REVISION) {
+  if (structured && body.revision !== ANALYSIS_REVISION) {
     throw new Error('The scoring service needs to be restarted or updated before it can score this recording.')
   }
 

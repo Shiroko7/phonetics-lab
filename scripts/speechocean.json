@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "speechocean762",
+  "repository": "jimbozhang/speechocean762",
+  "revision": "613968e3b0b789fc33936fb5eba1973176ba7d11",
+  "license": "CC-BY-4.0",
+  "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+  "licenseDeclaration": "https://www.openslr.org/101/",
+  "attribution": "Junbo Zhang, Zhiwen Zhang, Yongqing Wang, Zhiyong Yan, Qiong Song, Yukai Huang, Ke Li, Daniel Povey and Yujun Wang. speechocean762: An Open-Source Non-native English Speech Corpus For Pronunciation Assessment. Interspeech 2021.",
+  "treeEntriesSha256": "46ba02d034af9a40b405aadd5e92339d2ceba20ac06d02fca74a6c18686bd3e9",
+  "files": {
+    "resource/scores.json": "31c847b8ee29d61d8fe338bcbb1d4c4721425f05481d2144ad57cd19ea1159f8",
+    "resource/scores-detail.json": "8a90ff40558fe8032d9bfa919429dcae267c0ec3fbdedf1dca30c0515ea989e1",
+    "test/text": "a0cf51d5f21b9e404b405672e85363e341dc2b8d510de41132d326f5f543382c",
+    "test/utt2spk": "061291f397f8c281ff1bf6bf388e875ab9c4cc0de66f37d8559e690af08964be",
+    "test/spk2age": "bcc719f23f2352b76f3cec80f12a02f97d775ecfa7b77646be136159caf036d3",
+    "test/wav.scp": "ec911e9319759c73e71ab62dc9cf6a2a00a1d02b7b91a288b39e6d56451e66f3",
+    "train/utt2spk": "e83546f91fa7444547b8c690ef004ad514eee1f7066d38ec87f7a6c847c84737",
+    "README.md": "4f29e91dda24a591bbb7c99b52a9b874779fda6ad4c3346a7430f51e957da3c2"
+  }
+}

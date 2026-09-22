@@ -11,6 +11,10 @@ The dictionary and browser scoring run locally. Optional GPU scoring uses the lo
 service. Free online reference voices need an internet connection but no API key,
 subscription, or payment account.
 
+Original project code is licensed under [Apache-2.0](LICENSE). Downloaded resources
+and dependencies keep their own licenses; see [THIRD_PARTY.md](THIRD_PARTY.md).
+The current legacy word-frequency list is **not cleared for commercial use**.
+
 The [pronunciation accuracy roadmap](docs/pronunciation-roadmap.md) records the
 implemented reliability fixes, remaining limitations, evaluation protocol, and
 longer-term alignment, scoring, prosody and audio-capture work.
@@ -29,13 +33,49 @@ precisely. `make help` lists the rest.
 
 Without `make`, the same targets are `npm install && npm run dev`.
 
-The dictionary at `public/dict/cmudict-ipa.txt` is already built and checked in, so this
-works straight away. `npm run dict` regenerates it — it downloads CMUdict (3.6 MB, cached
-in `scripts/.cache`) and rewrites the table, which you only need after changing anything
-in `phonology.ts`.
+Use Node.js 22.18+ (Node 24 recommended). Before the web app, tests or build starts,
+the resource installer downloads pinned dictionary sources and their license notices,
+checks SHA-256 hashes, and generates `public/dict/`. These files and their source
+cache in `.cache/resources/` are local-only and ignored by Git.
+
+On first use, the legacy frequency list requires an explicit acknowledgment after
+reviewing its upstream personal/research-use terms. In an interactive terminal the
+installer asks; otherwise run this yourself if your use is permitted:
+
+```bash
+npm run assets -- --accept-personal-use
+```
+
+Later launches reuse the local files without downloading again. `npm run assets --
+--offline` verifies or rebuilds using only local caches; `npm run dict` / `npm run
+common` force regeneration from verified sources. Keep the downloaded license notices.
+The flag is not commercial permission. A commercial deployment needs a separately
+cleared replacement for the legacy frequency list.
+
+Speech models already download on first use into backend/browser caches. Large
+benchmark corpora are separate, opt-in resources, not first-launch dependencies.
+Registration-gated resources will require the user's own registration/agreement.
+
+### Human-rated benchmark (opt-in)
+
+The [human-benchmark guide](docs/human-benchmarks.md) documents the first measured
+100-speaker baseline, reproduction commands, limitations and remaining work.
+
+```bash
+npm run benchmark:prepare -- --limit 100
+# In another terminal: npm run dev:api
+npm run benchmark:run -- --limit 100
+```
+
+This downloads a pinned speechocean762 test selection into ignored `datasets/`,
+keeps its CC BY 4.0 attribution, and compares the local app scorer with independent
+human ratings. No paid/cloud scoring service is used. It is not part of app startup
+or Daily practice. Scores, coverage and human disagreement are measured separately;
+this corpus cannot validate word-cut boundaries because it supplies no human timings.
 
 `make check` runs both regression suites, `make build` produces a static `dist/` you can
-host anywhere.
+host subject to its resources' terms. Vite includes the generated `public/dict/`
+files in `dist/`, so a local-only Git policy is not permission to redistribute a build.
 
 ### The scoring service
 

@@ -143,6 +143,19 @@ class AnalyzeContractTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('Nothing was scored', response.json()['detail'])
 
+    def test_health_reports_revision_without_loading_model(self):
+        with patch.object(MODELS, '_phonemes', None), patch.object(MODELS, 'phonemes') as load:
+            body = self.client.get('/health').json()
+            self.assertEqual(body['scorer_revision'], SCORER_REVISION)
+            self.assertIsNone(body['phoneme_model_revision'])
+            load.assert_not_called()
+
+    def test_health_reports_loaded_model_configuration_commit(self):
+        fake = SimpleNamespace(model=SimpleNamespace(config=SimpleNamespace(_commit_hash='a' * 40)))
+        with patch.object(MODELS, '_phonemes', fake):
+            body = self.client.get('/health').json()
+            self.assertEqual(body['phoneme_model_revision'], 'a' * 40)
+
 
 if __name__ == '__main__':
     unittest.main()

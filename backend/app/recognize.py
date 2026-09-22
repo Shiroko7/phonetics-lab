@@ -139,6 +139,13 @@ class Models:
         return self._phonemes is not None
 
     @property
+    def phoneme_revision(self) -> str | None:
+        """Loaded HF model configuration commit, without triggering a download."""
+        if self._phonemes is None:
+            return None
+        return getattr(self._phonemes.model.config, "_commit_hash", None)
+
+    @property
     def words_ready(self) -> bool:
         return self._words is not None
 

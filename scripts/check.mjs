@@ -9,6 +9,7 @@
 import { readFile } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildDictionary } from './build-dict.mjs'
 import { isDeepStrictEqual } from 'node:util'
 import { analyze } from '../src/lib/analyze.ts'
 import { lookupWord } from '../src/lib/lookup.ts'
@@ -54,7 +55,10 @@ import { analyzeStats, exportStatsReport } from '../src/lib/analytics.ts'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 const dict = new Map()
-const raw = await readFile(join(ROOT, 'public', 'dict', 'cmudict-ipa.txt'), 'utf8')
+// A local source override validates a fresh transform without changing installed data.
+const raw = process.env.PHONETICS_DICTIONARY_SOURCE
+  ? buildDictionary(await readFile(process.env.PHONETICS_DICTIONARY_SOURCE, 'utf8'))
+  : await readFile(join(ROOT, 'public', 'dict', 'cmudict-ipa.txt'), 'utf8')
 for (const line of raw.split('\n')) {
   const tab = line.indexOf('\t')
   if (tab > -1) dict.set(line.slice(0, tab), line.slice(tab + 1).split('|'))
