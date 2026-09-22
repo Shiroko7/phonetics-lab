@@ -95,6 +95,11 @@ export interface AlignedPhone {
   verdict: Verdict
   /** 0 = identical, 1 = unrelated. Null for insertions and deletions. */
   distance: number | null
+  /** The scorer's numerical result; never reconstruct it from a verdict. */
+  score?: number
+  /** Acoustic evidence, retained for diagnostics and future calibration. */
+  posterior?: number
+  gop?: number
   /** Index into the expected sequence, for mapping back onto words. */
   expectedIndex: number | null
   /**
@@ -114,7 +119,7 @@ export interface Heard {
   end: number
 }
 
-const GAP_PENALTY = 0.75
+export const GAP_PENALTY = 0.75
 /** Below this, a substitution is a near miss worth coaching rather than a gross error. */
 const CLOSE_BELOW = 0.25
 
@@ -143,6 +148,10 @@ function effectiveDistance(
   const variants = allowedVariants?.get(index)
   if (variants && variants.has(actual)) return 0
   return phoneDistance(expected, actual)
+}
+
+export function pronunciationDistance(expected: string, actual: string): number {
+  return effectiveDistance(expected, actual, 0)
 }
 
 function verdictFor(
@@ -250,7 +259,8 @@ export function scoreAlignment(aligned: AlignedPhone[]): Score {
       continue
     }
     possible += 1
-    if (step.verdict === 'correct') earned += 1
+    if (step.score !== undefined && Number.isFinite(step.score)) earned += Math.min(100, Math.max(0, step.score)) / 100
+    else if (step.verdict === 'correct') earned += 1
     else if (step.verdict === 'close') earned += 0.5
     else if (step.verdict === 'wrong') earned += Math.max(0, 1 - (step.distance ?? 1)) * 0.4
   }

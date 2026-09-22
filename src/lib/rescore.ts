@@ -99,11 +99,12 @@ export async function rescoreOne(attempt: Attempt, dict: Dictionary): Promise<At
   const clip = await getClip(attempt.at)
   if (!clip) throw new Error('the recording is no longer stored')
 
-  const expected = flatten(targetWords(attempt.target, dict))
+  const words = targetWords(attempt.target, dict)
+  const expected = flatten(words)
   if (expected.length === 0) throw new Error('no pronounceable words in the line')
 
   const samples = await decodeToMono16k(clip.blob)
-  const remote = await analyzeRemote(samples, expected)
+  const remote = await analyzeRemote(samples, expected, words)
 
   return {
     ...attempt,

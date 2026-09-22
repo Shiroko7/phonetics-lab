@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 
 import numpy as np
 import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import ValidationError
 
-from . import align, audio, phones
+from . import align, audio, phones, lattice
 from .models import (
     AnalyzeResponse,
     AudioInfo,
@@ -26,6 +28,7 @@ from .models import (
     HeardPhone,
     PhoneResult,
     TranscribeResponse,
+    TargetWord,
 )
 from .recognize import MODELS, PHONEME_MODEL, WORD_MODEL, pick_device
 from .voice import router as voice_router
@@ -79,6 +82,8 @@ def free_decode(
     previous = -1
     for frame, token_id in enumerate(best):
         token_id = int(token_id)
+        if token_id == previous and token_id != blank and inventory.phone_for(token_id) and out:
+            out[-1].end = round(offset_seconds + (frame + 1) * seconds_per_frame, 3)
         if token_id != previous and token_id != blank:
             phone = inventory.phone_for(token_id)
             if phone:
@@ -97,6 +102,7 @@ def free_decode(
 async def analyze(
     audio_file: UploadFile = File(..., alias="audio"),
     expected: str = Form(..., description="JSON array of General American phones."),
+    words: str | None = Form(None, description="Ordered words with canonical phones and complete pronunciation alternatives."),
 ) -> AnalyzeResponse:
     try:
         wanted = json.loads(expected)
@@ -106,6 +112,17 @@ async def analyze(
         raise HTTPException(400, "`expected` must be a JSON array of phone strings")
     if not wanted:
         raise HTTPException(400, "`expected` is empty; there is nothing to score")
+    try:
+        word_data = json.loads(words) if words is not None else [{"text": "legacy target", "phones": wanted}]
+        if not isinstance(word_data, list) or not 1 <= len(word_data) <= 200:
+            raise ValueError("Supply between 1 and 200 target words.")
+        target_words = [TargetWord.model_validate(word) for word in word_data]
+        if [p for word in target_words for p in word.phones] != wanted:
+            raise ValueError("Word phones must match the expected phone sequence in order.")
+        if sum(len(word.phones) for word in target_words) > 1000:
+            raise ValueError("Please practise a shorter passage (at most 1000 sounds).")
+    except (ValueError, ValidationError) as err:
+        raise HTTPException(400, f"Invalid word pronunciations: {err}") from err
 
     raw = await audio_file.read()
     try:
@@ -120,38 +137,26 @@ async def analyze(
         raise HTTPException(400, "that recording is silent")
 
     model = MODELS.phonemes()
-    tokens, sources, variants = phones.to_tokens(wanted, model.inventory.vocab)
-    if not tokens:
-        raise HTTPException(
-            400, "none of those phones are in the recogniser's inventory"
-        )
-
     log_probs, seconds_per_frame = model.log_probs(samples)
 
     try:
-        scored = align.score_phones(
-            log_probs=log_probs,
-            token_ids=[model.inventory.vocab[t] for t in tokens],
-            tokens=tokens,
-            english_ids=model.inventory.english_ids,
-            id_to_token=model.inventory.id_to_token,
-            blank=model.blank,
-            variant_ids=[
-                [model.inventory.vocab[t] for t in group] for group in variants
-            ],
-        )
+        align.validate_log_probs(log_probs)
+        if not np.isin(log_probs.argmax(axis=1), model.inventory.english_ids).any():
+            raise ValueError("The model could not identify English sounds in this recording. Nothing was scored.")
+        scored = lattice.align_words(log_probs, target_words, model.inventory, model.blank)
     except ValueError as err:
         raise HTTPException(400, str(err)) from err
 
     results: list[PhoneResult] = []
-    for entry, covers in zip(scored, sources):
+    for token in scored:
+        entry, covers = token.score, token.sources
         verdict = align.verdict_for(entry)
         percent = align.to_percent(entry.gop)
         heard = phones.REVERSE.get(entry.runner_up or "", None)
 
         # A merged token (ɑ + ɹ scored as ɑːɹ) reports the same result for both
         # of the phones it stands for, so the caller's indices stay intact.
-        for index in covers:
+        for index, realized in zip(covers, token.realized):
             results.append(
                 PhoneResult(
                     index=index,
@@ -162,12 +167,13 @@ async def analyze(
                     posterior=round(entry.posterior, 4),
                     heard=heard if verdict in ("close", "wrong") else None,
                     heard_posterior=round(entry.runner_up_posterior, 4),
+                    realized=realized,
                     start=round(offset_seconds + entry.start_frame * seconds_per_frame, 3),
                     end=round(offset_seconds + entry.end_frame * seconds_per_frame, 3),
                 )
             )
 
-    overall = int(round(sum(r.score for r in results) / len(results))) if results else 0
+    overall = math.floor(sum(r.score for r in results) / len(results) + 0.5) if results else 0
 
     return AnalyzeResponse(
         phones=results,

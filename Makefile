@@ -70,7 +70,7 @@ check-web:
 
 check-api:
 	$(UV) run --directory backend python -m app.cli check
-	$(UV) run --directory backend python -m unittest test_voice
+	$(UV) run --directory backend python -m unittest test_voice test_scoring
 
 ## Build and teardown ---------------------------------------------------------
 

@@ -71,7 +71,7 @@ const FUNCTION_WORD_RULES: Record<string, RuleHandler> = {
       return {
         ipa: 'wəz',
         variants: ['wəz', 'wɑz', 'wɔz'],
-        connectedNote: `In running speech, Americans reduce "was" to weak /wəz/ (sounds like "wuz") rather than citation /wɑz/ ("wahz"). Both are scored as 100% correct.`,
+        connectedNote: `In running speech, Americans reduce "was" to weak /wəz/ (sounds like "wuz") rather than citation /wɑz/ ("wahz"). Both are accepted pronunciation targets.`,
         spellingNote: `Spelled with "a", but the vowel reduces to schwa /ə/ ("wuz") in connected speech.`,
       }
     }
@@ -168,7 +168,7 @@ const FUNCTION_WORD_RULES: Record<string, RuleHandler> = {
       return {
         ipa: 'fɚ',
         variants: ['fɚ', 'fɔɹ'],
-        connectedNote: `In running speech, "for" reduces to /fɚ/ (sounds like "fer") rather than citation /fɔɹ/. Both are accepted.`,
+        connectedNote: `In running speech, "for" reduces to /fɚ/ (sounds like "fer") rather than citation /fɔɹ/. Both are natural; the scorer currently uses the reduced form here.`,
         spellingNote: `Spelled "for" with "or", but reduces to /fɚ/ ("fer") in speech.`,
       }
     }
@@ -240,7 +240,7 @@ const FUNCTION_WORD_RULES: Record<string, RuleHandler> = {
       return {
         ipa: 'ənd',
         variants: ['ənd', 'ən', 'n', 'ænd'],
-        connectedNote: `In running speech, "and" reduces to /ənd/ or /ən/ ("und" / "un") rather than citation /ænd/. Both are accepted.`,
+        connectedNote: `In running speech, "and" can reduce to /ənd/, /ən/ or /n/. These reductions are natural; scoring /ən/ and /n/ without penalizing the omitted sounds is not yet supported.`,
         spellingNote: `Spelled "and", often pronounced /ənd/ or /ən/ in running speech.`,
       }
     }

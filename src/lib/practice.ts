@@ -7,7 +7,8 @@
  * attempts is a real habit worth naming.
  */
 
-import type { AlignedPhone, Score } from './align.ts'
+import { scoreAlignment, type AlignedPhone, type Score } from './align.ts'
+import { ANALYSIS_REVISION } from './backend.ts'
 
 /**
  * Which scorer produced an attempt's numbers.
@@ -27,8 +28,9 @@ export type Scorer = 'browser' | 'gop'
  * itself the next time the app opens with the service running.
  *
  * 1: forced alignment + GOP, hand-set thresholds.
+ * 2: word-aware variant paths, numerical scores, acoustic validity checks.
  */
-export const SCORER_REVISION = 1
+export const SCORER_REVISION = ANALYSIS_REVISION
 
 export interface Attempt {
   /** The phrase that was practised. */
@@ -49,6 +51,10 @@ export function scorerOf(attempt: Attempt): Scorer {
   return attempt.scorer ?? 'browser'
 }
 
+export function sameScoringScale(a: Attempt, b: Attempt): boolean {
+  return scorerOf(a) === scorerOf(b) && (a.rev ?? 0) === (b.rev ?? 0)
+}
+
 /** Whether an attempt's numbers came from the scoring service as it stands now. */
 export function isCurrent(attempt: Attempt): boolean {
   return scorerOf(attempt) === 'gop' && attempt.rev === SCORER_REVISION
@@ -57,8 +63,7 @@ export function isCurrent(attempt: Attempt): boolean {
 /** True when a run of attempts mixes the two scales, so trends across them lie. */
 export function mixedScorers(attempts: Attempt[]): boolean {
   if (attempts.length < 2) return false
-  const first = scorerOf(attempts[0])
-  return attempts.some((attempt) => scorerOf(attempt) !== first)
+  return attempts.some((attempt) => !sameScoringScale(attempt, attempts[0]))
 }
 
 export interface PhoneStat {
@@ -82,7 +87,15 @@ export function loadAttempts(): Attempt[] {
     const raw = localStorage.getItem(HISTORY_KEY)
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
-    return Array.isArray(parsed) ? (parsed as Attempt[]) : []
+    if (!Array.isArray(parsed)) return []
+    return (parsed as Attempt[]).map((attempt) => {
+      if (attempt.scorer !== 'gop' || !Array.isArray(attempt.aligned)) return attempt
+      // v1 persisted the original numerical score indirectly as distance.
+      // Restore it without inventing acoustic evidence or changing revision.
+      const aligned = attempt.aligned.map((step) => step.score === undefined && step.distance !== null
+        ? { ...step, score: Math.round(100 * (1 - step.distance)) } : step)
+      return { ...attempt, aligned, score: scoreAlignment(aligned) }
+    })
   } catch {
     return []
   }

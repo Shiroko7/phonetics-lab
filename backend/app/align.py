@@ -40,6 +40,14 @@ import numpy as np
 NEG_INF = -1e30
 
 
+def validate_log_probs(log_probs: np.ndarray) -> None:
+    """Reject unusable model output; this is a validity check, not calibration."""
+    if log_probs.ndim != 2 or min(log_probs.shape) == 0 or not np.isfinite(log_probs).all():
+        raise ValueError("The acoustic model returned invalid output. Please try the recording again.")
+    if np.all(np.ptp(log_probs, axis=1) < 1e-6):
+        raise ValueError("The acoustic model could not distinguish sounds in this recording. Nothing was scored.")
+
+
 @dataclass
 class PhoneScore:
     """How one expected phone fared."""
@@ -70,12 +78,14 @@ def viterbi_align(
 
     Returns one (start, end) frame span per entry of `token_ids`.
     """
+    validate_log_probs(log_probs)
     T, _ = log_probs.shape
     L = len(token_ids)
     if L == 0:
         raise ValueError("nothing to align against")
     S = 2 * L + 1
-    if T < L:
+    minimum = L + sum(a == b for a, b in zip(token_ids, token_ids[1:]))
+    if T < minimum:
         raise ValueError(
             f"the recording is too short for this line: {T} frames for {L} phones"
         )
@@ -108,6 +118,8 @@ def viterbi_align(
 
     # A valid path ends on the last symbol or the blank after it.
     s = S - 1 if dp[S - 1] >= dp[S - 2] else S - 2
+    if dp[s] <= NEG_INF / 2:
+        raise ValueError("The recording cannot be aligned to the expected sounds.")
     path = np.empty(T, dtype=np.int64)
     for t in range(T - 1, -1, -1):
         path[t] = s
@@ -146,6 +158,20 @@ def score_phones(
     app's own README calls right.
     """
     spans = viterbi_align(log_probs, token_ids, blank=blank)
+    return score_spans(log_probs, spans, token_ids, tokens, english_ids, id_to_token, variant_ids)
+
+
+def score_spans(
+    log_probs: np.ndarray,
+    spans: list[tuple[int, int]],
+    token_ids: list[int],
+    tokens: list[str],
+    english_ids: list[int],
+    id_to_token: dict[int, str],
+    variant_ids: list[list[int]] | None = None,
+) -> list[PhoneScore]:
+    """Measure already aligned token spans, including paths selected by the word lattice."""
+    validate_log_probs(log_probs)
     best_per_frame = log_probs.max(axis=1)
     english = np.asarray(english_ids, dtype=np.int64)
     variants = variant_ids or [[] for _ in token_ids]
@@ -153,8 +179,8 @@ def score_phones(
     out: list[PhoneScore] = []
     for (start, end), token_id, token, alternates in zip(spans, token_ids, tokens, variants):
         if end <= start:
-            # No frames at all: the model never found room for this phone, which
-            # is the alignment's way of saying it was not produced.
+            # Legacy zero-width result: no usable acoustic evidence. This does
+            # not establish that the speaker omitted the phone.
             out.append(
                 PhoneScore(token, token_id, start, end, float(NEG_INF), 0.0, None, 0.0)
             )

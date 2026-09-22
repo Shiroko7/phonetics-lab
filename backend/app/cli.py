@@ -75,7 +75,7 @@ def check_suite() -> int:
     # the canonical token alone marks down every unstressed vowel in English.
     check("a schwa may surface as espeak's ɐ", variants[1][0], "ɐ")
     check("a coda /l/ may be dark", variants[2], ["ɫ"])
-    check("and a tense vowel may lose its length mark", variants[3], ["i", "ɪ"])
+    check("a tense vowel may lose length, but not become KIT", variants[3], ["i"])
 
     tokens, _, _ = phones.to_tokens(["i", "ɡ", "u"])
     check("espeak carries length in the symbol", tokens, ["iː", "ɡ", "uː"])

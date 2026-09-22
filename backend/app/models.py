@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+SCORER_REVISION = 2
+
+
+class TargetWord(BaseModel):
+    text: str = Field(min_length=1, max_length=200)
+    phones: list[str] = Field(min_length=1, max_length=64)
+    pronunciations: list[list[str]] = Field(default_factory=list, max_length=32)
+
 
 class PhoneResult(BaseModel):
     """One expected phone, as the model heard it."""
@@ -19,6 +27,7 @@ class PhoneResult(BaseModel):
         description="The phone the model would rather have heard, in General American.",
     )
     heard_posterior: float = 0.0
+    realized: str | None = None
     start: float
     end: float
 
@@ -38,6 +47,7 @@ class AudioInfo(BaseModel):
 
 
 class AnalyzeResponse(BaseModel):
+    revision: int = SCORER_REVISION
     phones: list[PhoneResult]
     # Forced alignment answers "how well was each expected phone produced" and
     # by construction has no opinion about sounds that were not expected. The

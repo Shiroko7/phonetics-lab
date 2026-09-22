@@ -7,7 +7,7 @@
   "scripts": {
     "dict": "node scripts/build-dict.mjs",
     "common": "node scripts/build-common.mjs",
-    "check": "node scripts/check.mjs",
+    "check": "node scripts/check.mjs && node scripts/check-pronunciation.mjs",
     "dev": "concurrently -n web,api -c cyan,magenta \"npm:dev:web\" \"npm:dev:api\"",
     "dev:web": "vite",
     "dev:api": "uv run --directory backend uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload --reload-dir app",

@@ -5,13 +5,10 @@ The browser already holds exactly what the model wants — `recorder.ts` decodes
 every take to mono 16 kHz float32 before it does anything else — so the client
 sends that, wrapped in a WAV header, and this module mostly just unwraps it.
 
-That is a deliberate choice over posting the recorded WebM/Opus and decoding it
-here. Opus is a perceptual codec: it spends its bits where the ear notices and
-discards detail where it does not, and a good deal of what it discards lives in
-the 4-8 kHz band that separates /s/ from /ʃ/ from /f/ from /θ/ — among the most
-commonly confused phones in the language, and the ones a learner most needs
-judged fairly. Sending uncompressed samples keeps that evidence, and as a side
-effect keeps ffmpeg off the dependency list entirely.
+Sending WAV avoids another encoding step and keeps ffmpeg off this service's
+dependency list. These samples have already passed through MediaRecorder's
+capture codec in the browser; WAV transport cannot restore any detail lost
+there. Raw PCM capture and its effect on accuracy remain future work.
 """
 
 from __future__ import annotations

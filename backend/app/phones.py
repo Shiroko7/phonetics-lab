@@ -147,7 +147,7 @@ VARIANTS: dict[str, tuple[str, ...]] = {
     "ə": ("ɐ", "ʌ", "ɘ", "ɵ"),
     "ʌ": ("ɐ", "ə"),
     # Length marks come and go with stress.
-    "i": ("i", "ɪ"),
+    "i": ("i",),
     "u": ("u", "ʉ"),
     "ɑ": ("ɑ", "ɒ", "ɔː", "ɔ"),
     "ɔ": ("ɔ", "ɑː", "ɑ"),
@@ -156,7 +156,7 @@ VARIANTS: dict[str, tuple[str, ...]] = {
     "æ": ("a",),
     # NURSE and its unstressed twin.
     "ɝ": ("ɜ", "ɚ"),
-    "ɚ": ("ɜː", "ɜ", "ə"),
+    "ɚ": ("ɜː", "ɜ"),
     # Diphthongs espeak may write with a different first target.
     "eɪ": ("ɛɪ", "e"),
     "oʊ": ("o", "oː", "əʊ"),

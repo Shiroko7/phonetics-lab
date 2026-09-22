@@ -9,6 +9,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { syncCandidates } from '../src/lib/daily.ts'
+import { ANALYSIS_REVISION } from '../src/lib/backend.ts'
 
 const executable = process.env.CHROME_PATH ?? [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
@@ -92,13 +93,21 @@ try {
     speech.speak = utterance => { speechTimer = setTimeout(() => window.__audioFailure ? utterance.onerror?.({error:'audio-busy'}) : utterance.onend?.(), 120); };
     Object.defineProperty(window, 'speechSynthesis', {value:speech});
     const realFetch = window.fetch.bind(window);
+    const originalStart = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function(when, offset, duration) {
+      window.__lastSlice = { offset, duration };
+      return originalStart.call(this, when, offset, duration);
+    };
     window.fetch = async (input, options) => {
       const address = String(input);
       if (address === 'http://127.0.0.1:8000/tts/voices' && !${liveVoices}) return Response.json({voices:[]});
       if (address === 'http://127.0.0.1:8000/health') return Response.json({device:'test', cuda:false, gpu:null, torch:'test', phoneme_model:'test'});
       if (address === 'http://127.0.0.1:8000/analyze') {
         const expected = JSON.parse(options.body.get('expected'));
-        return Response.json({phones:expected.map((phone, index) => ({index, expected:phone, verdict:window.__badTake && index % 3 === 0 ? 'wrong' : 'correct', heard:'k', score:window.__badTake && index % 3 === 0 ? 20 : 100, start:index*.02, end:(index+1)*.02})), overall:window.__badTake ? 70 : 100, free:[], device:'test'});
+        if (!JSON.parse(options.body.get('words'))?.length) throw new Error('Word ownership was not sent');
+        window.__firstWordEnd = JSON.parse(options.body.get('words'))[0].phones.length * .02;
+        const phones = expected.map((phone, index) => ({index, expected:phone, verdict:window.__badTake && index % 3 === 0 ? 'wrong' : 'correct', heard:'k', score:window.__badTake && index % 3 === 0 ? 20 : (window.__phoneScore ?? 100), start:index*.02, end:(index+1)*.02}));
+        return Response.json({revision:${ANALYSIS_REVISION}, phones, overall:Math.round(phones.reduce((sum,p) => sum+p.score, 0)/phones.length), free:[], device:'test'});
       }
       return realFetch(input, options);
     };
@@ -176,7 +185,35 @@ try {
     await click('Stop & Score')
     await waitFor(`!!document.querySelector('.word-diagnostics-deck')`, 'word diagnostics after scoring')
   }
+  await evaluate('window.__phoneScore = 73')
   await recordTake()
+  assert.equal(await evaluate(`document.querySelector('.score-value').textContent`), '73', 'backend scores are displayed numerically')
+  assert.equal(await evaluate(`document.querySelector('.word-score').textContent`), '73', 'word scores use the same scale')
+  await click('▶ Yours')
+  await waitFor(`window.__lastSlice?.duration > 0`, 'word slice started')
+  const isolated = await evaluate('window.__lastSlice')
+  const firstWordEnd = await evaluate('window.__firstWordEnd')
+  assert(isolated.offset + isolated.duration <= firstWordEnd, 'isolated replay does not include padding or minimum-duration expansion')
+  assert.equal(isolated.offset, 0, 'first word starts at its own boundary')
+  await click('▶ In context')
+  await waitFor(`window.__lastSlice.duration > ${isolated.duration}`, 'context intentionally includes neighboring words')
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+  await pause(100)
+  assert(await evaluate(`document.documentElement.scrollWidth <= window.innerWidth`), 'diagnostics and replay controls fit on mobile')
+  await evaluate(`document.querySelector('.word-diagnostics-deck').scrollIntoView({block:'start'})`)
+  assert(await evaluate(`(() => {
+    const card = document.querySelector('.word-inspection-card').getBoundingClientRect();
+    return [...document.querySelectorAll('.inspection-audio-actions button')].every(button => {
+      const box = button.getBoundingClientRect();
+      return box.left >= card.left && box.right <= card.right;
+    });
+  })()`), 'all replay buttons stay inside the mobile word card')
+  const diagnosticsScreenshot = await send('Page.captureScreenshot', { format: 'png' })
+  const diagnosticsPath = join(tmpdir(), `phonetics-diagnostics-${Date.now()}.png`)
+  await writeFile(diagnosticsPath, Buffer.from(diagnosticsScreenshot.data, 'base64'))
+  console.log(`Diagnostics screenshot: ${diagnosticsPath}`)
+  await send('Emulation.clearDeviceMetricsOverride')
+  await evaluate('window.__phoneScore = 100')
   const savedProduction = await evaluate(`(${current}).events.find(event => event.kind === 'production')`)
   const productionVoice = await evaluate(`document.querySelector('[aria-label="Reference voice"]').dataset.voiceUri`)
   await click('Another voice')

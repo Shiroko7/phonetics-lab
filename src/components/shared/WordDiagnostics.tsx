@@ -63,6 +63,7 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
           </div>
 
           <div className="score-meta">
+            <span className="inspection-said">Pronunciation estimate · stress and rhythm aren’t assessed yet</span>
             {earlier && (
               <div className={`score-delta-chip ${changeOf(score.overall - earlier.score.overall)}`}>
                 {score.overall === earlier.score.overall ? (
@@ -180,14 +181,14 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
             <div className="inspection-word-info">
               <span className="inspection-text">{open.text}</span>
               <span className="inspection-ipa">/{formatIPA(open.ipa, display)}/</span>
-              {open.said && <span className="inspection-said">heard: /{open.said}/</span>}
+              {open.said && <span className="inspection-said">estimated sounds: /{open.said}/</span>}
             </div>
 
             <div className="inspection-audio-actions">
               <button
                 className="ghost tiny"
                 onClick={() => speak(open.text)}
-                title="Hear reference audio"
+                title="Hear the reference word in isolation"
               >
                 ♪ Target
               </button>
@@ -200,8 +201,17 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
                   ▶ Yours
                 </button>
               )}
+              {open.contextSpan && playback && (
+                <button className="ghost tiny" onClick={() => void playWord(open.contextSpan!)} title="Hear your recording with neighboring words">
+                  ▶ In context
+                </button>
+              )}
+              <button className="ghost tiny" onClick={() => speak(target)} title="Hear the full reference sentence with connected speech">
+                ♪ Reference sentence
+              </button>
             </div>
           </div>
+          {open.timing === 'ambiguous' && <p className="inspection-said">This word’s estimated timing overlaps another word. Use “In context” to hear it.</p>}
 
           {/* Connected Speech Spelling vs Sound Callout */}
           {open.connectedNote && (
@@ -250,7 +260,7 @@ export function WordDiagnostics({ practice, compact, hideReplayButtons }: Props)
 
       {produced && (
         <div className="take-acoustic-heard">
-          <span className="acoustic-label">Acoustic transcript heard:</span>
+          <span className="acoustic-label">Estimated aligned sounds:</span>
           <span className="acoustic-ipa">/{produced}/</span>
         </div>
       )}

@@ -14,6 +14,10 @@
  */
 
 import type { AlignedPhone, Heard, Verdict } from './align.ts'
+import type { TargetWord } from './report.ts'
+import { wordPronunciations } from './wordAlignment.ts'
+
+export const ANALYSIS_REVISION = 2
 
 const BASE = 'http://127.0.0.1:8000'
 /** Long enough for a loaded service to answer, short enough not to stall a take. */
@@ -79,9 +83,8 @@ export function reprobe(): Promise<BackendInfo | null> {
  * Wrap 16 kHz mono samples in a WAV header, uncompressed.
  *
  * 32-bit float rather than 16-bit PCM: these are the exact samples the browser
- * already decoded, and the point of sending them at all is that nothing on the
- * way to the model throws detail away. The recorded Opus blob is kept for
- * playback, where lossy is fine — it is only the scoring path that cares.
+ * already decoded. This prevents further encoding loss; microphone capture
+ * currently passes through MediaRecorder's codec before these samples exist.
  */
 export function encodeWav(samples: Float32Array, sampleRate = 16_000): Blob {
   const bytes = samples.length * 4
@@ -130,10 +133,14 @@ async function fail(res: Response): Promise<never> {
 export async function analyze(
   samples: Float32Array,
   expected: string[],
+  words?: TargetWord[],
 ): Promise<RemoteAnalysis> {
   const form = new FormData()
   form.append('audio', encodeWav(samples), 'take.wav')
   form.append('expected', JSON.stringify(expected))
+  if (words) form.append('words', JSON.stringify(words.map((word) => ({
+    text: word.text, phones: word.phones, pronunciations: wordPronunciations(word),
+  }))))
 
   const res = await fetch(`${BASE}/analyze`, { method: 'POST', body: form })
   if (!res.ok) await fail(res)
@@ -142,11 +149,17 @@ export async function analyze(
     phones: {
       index: number; expected: string; verdict: Verdict; score: number
       gop: number; posterior: number; heard: string | null
+      realized?: string | null
       start: number; end: number
     }[]
     free: { phone: string; start: number; end: number }[]
     overall: number
     device: string
+    revision?: number
+  }
+
+  if (words && body.revision !== ANALYSIS_REVISION) {
+    throw new Error('The scoring service needs to be restarted or updated before it can score this recording.')
   }
 
   return {
@@ -154,8 +167,11 @@ export async function analyze(
       expected: phone.expected,
       // A phone the model agreed with was produced as asked; one it did not
       // carries the sound it would rather have heard.
-      actual: phone.verdict === 'correct' ? phone.expected : phone.heard,
+      actual: phone.verdict === 'correct' ? (phone.realized ?? phone.expected) : phone.heard,
       verdict: phone.verdict,
+      score: phone.score,
+      posterior: phone.posterior,
+      gop: phone.gop,
       // The rest of the app reads `distance` as 0 = perfect, 1 = unrelated,
       // which is the score turned around.
       distance: 1 - phone.score / 100,

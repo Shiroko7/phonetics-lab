@@ -1983,8 +1983,12 @@ button.recording {
 
 .inspection-audio-actions {
   display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 6px;
 }
+
+.inspection-audio-actions button { white-space: nowrap; }
 
 .word-connected-badge {
   font-size: 11px;
@@ -5974,4 +5978,3 @@ button.recording {
   padding-top: 10px;
   border-top: 1px solid var(--line);
 }
-

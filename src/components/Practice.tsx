@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 import type { Dictionary } from '../lib/dict.ts'
 import { formatIPA, type DisplayOptions } from '../lib/display.ts'
 import {
-  alignPhones, normalizeRecognized, scoreAlignment,
+  normalizeRecognized, scoreAlignment,
   type AlignedPhone, type Heard,
 } from '../lib/align.ts'
 import { describeSubstitution } from '../lib/phonefeatures.ts'
@@ -32,6 +32,8 @@ import {
 } from '../lib/phrasebank.ts'
 import { PHONES } from '../lib/phones.ts'
 import { contextsForWord } from '../lib/context.ts'
+import { playbackSlice } from '../lib/playback.ts'
+import { alignWordVariants } from '../lib/wordAlignment.ts'
 import {
   loadStruggles, saveStruggles, recordWordReports, removeStruggledWord,
   togglePinnedWord, addManualWord, syncStrugglesFromAttempts, isStrugglingLot,
@@ -69,11 +71,6 @@ type Track = 'target' | 'mine'
  * *expected* by anything, and there is nothing to practise them against.
  */
 const DRILLABLE = Object.entries(PHONES).filter(([phone]) => phone !== 'ɾ' && phone !== 'ʔ')
-
-/** Seconds of run-up when playing one word, to catch its onset. */
-const LEAD_IN = 0.06
-/** No slice is shorter than this; a clipped consonant is inaudible. */
-const MIN_SLICE = 0.15
 
 /** A take that can be played: this session's, or one read back from storage. */
 interface Playback {
@@ -276,10 +273,9 @@ export function Practice({
           source.current = null
           setPlaying((track) => (track === 'mine' ? null : track))
         }
-        // A little lead-in: CTC marks a phone where the model becomes sure of
-        // it, which is a fraction after the sound itself begins.
-        const from = Math.max(0, span.start - LEAD_IN)
-        node.start(0, from, Math.max(MIN_SLICE, span.end - from))
+        const slice = playbackSlice(span, decoded.current.duration, decoded.current.sampleRate)
+        if (!slice) return
+        node.start(0, slice.start, slice.end - slice.start)
         source.current = node
         setPlaying('mine')
       } catch {
@@ -420,7 +416,7 @@ export function Practice({
         const blob = playback?.blob ?? (await getClip(at))?.blob
         if (blob) {
           try {
-            const remote = await analyzeRemote(await decodeToMono16k(blob), expected)
+            const remote = await analyzeRemote(await decodeToMono16k(blob), expected, wordsFor(phrase))
             setAligned(remote.aligned)
             updateStrugglesWithTake(phrase, remote.aligned, at)
             onAttempt(
@@ -444,7 +440,7 @@ export function Practice({
         }
       }
 
-      const result = alignPhones(expected, heard)
+      const result = alignWordVariants(wordsFor(phrase), heard)
       setAligned(result)
       updateStrugglesWithTake(phrase, result, at)
       onAttempt(
@@ -569,7 +565,7 @@ export function Practice({
           return
         }
 
-        const remote = await analyzeRemote(taken.samples, wanted)
+        const remote = await analyzeRemote(taken.samples, wanted, wordsFor(phrase))
         setHeard(remote.free)
         setCorrected(false)
 
@@ -635,7 +631,7 @@ export function Practice({
       setCorrected(false)
 
       const at = Date.now()
-      const result = alignPhones(flatten(wordsFor(phrase)), said)
+      const result = alignWordVariants(wordsFor(phrase), said)
       setAligned(result)
       updateStrugglesWithTake(phrase, result, at)
       setPhase('done')

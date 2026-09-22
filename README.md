@@ -11,6 +11,10 @@ The dictionary and browser scoring run locally. Optional GPU scoring uses the lo
 service. Free online reference voices need an internet connection but no API key,
 subscription, or payment account.
 
+The [pronunciation accuracy roadmap](docs/pronunciation-roadmap.md) records the
+implemented reliability fixes, remaining limitations, evaluation protocol, and
+longer-term alignment, scoring, prosody and audio-capture work.
+
 ## Running it
 
 ```bash
@@ -330,9 +334,10 @@ thing that actually distinguishes a fumbled /θ/ from a clean one — is discard
 first step, and every later stage is repair work on a hard decision it can no longer see
 inside.
 
-The service inverts it. The target is known, so the audio is threaded through *that*
-sequence by CTC forced alignment and nothing else. What comes back is where each expected
-phone was and how strongly the model believed in it:
+The service aligns audio through complete pronunciation alternatives for each word.
+Revision 2 preserves word boundaries and lets allophones influence alignment as well
+as scoring. The reported timestamps are model estimates, not exact acoustic boundaries.
+For the selected sound and frames it computes:
 
     GOP(p) = mean over the phone's frames of [ log P(p | frame) − max_q log P(q | frame) ]
 
@@ -363,16 +368,23 @@ schwa scored 52% until `ɐ` was admitted as a correct production of it, and 100%
 The accepted allophones the browser already honours — tapped /t/, cot-caught — are in the
 same table, so the two scorers never disagree about whether *about* is a mistake.
 
-This is a pronunciation lattice one phone wide. Connected speech wants the same treatment
-a level up, where the target sequence is built: linking, elision, the palatalised
-*did you*. That is the next thing worth doing, and the thresholds below are the one after.
+The word pronunciation graph currently accepts equal-length alternatives. It does not
+yet handle elision, different-length weak forms or reliable insertion/deletion diagnosis.
+Numerical phone scores are preserved through word/sentence displays and history;
+categorical verdicts are not converted back into a different score.
+
+Isolated word replay stays inside its estimated interval, without padding or a minimum
+duration. “In context” includes neighboring words deliberately. Overlapping word timings
+offer context replay only. A full reference-sentence button complements the isolated
+reference word, whose pronunciation can differ naturally from connected speech.
 
 **What is still provisional.** The GOP cutoffs between correct, close and wrong are
 hand-set and deliberately lenient. Honest ones are per-phone and fitted to human judgement
 — /ð/ and /ə/ sit low even when perfectly produced, because the model spreads probability
 over neighbours that sound the same, while /s/ sits near zero. speechocean762 is the corpus
-for fitting them; until that is done the numbers rank attempts against each other well and
-should not be read as absolute marks. They live in one place, `backend/app/align.py`.
+for fitting them, alongside representative speakers and native controls. Until that is
+done, neither absolute accuracy nor reliable ranking of attempts has been established.
+The thresholds live in `backend/app/align.py`.
 
 **What it cannot see.** Forced alignment answers how well each *expected* phone was
 produced, and by construction has no opinion about sounds nobody expected — an inserted
@@ -575,17 +587,17 @@ same recording differently.
 - Practice feedback is only as good as the recogniser. It is trained on many languages and
   can misread a heavy accent, so a flagged phone is evidence rather than proof — treat a
   repeated pattern across attempts as the real signal, not one bad slot.
-- Stress and rhythm are not scored yet, only the segments. The scoring service has the
-  exact phone boundaries needed for it — duration, energy and F0 per segment — and
-  `parselmouth` is already a dependency; nothing reads them yet.
-- GOP thresholds are hand-set rather than fitted to human scores, so the numbers compare
-  attempts well and are not absolute marks. See *How the comparison works*.
+- Stress and rhythm are not scored yet, only the segments. The service estimates
+  phone boundaries; reliable duration, energy and F0 assessment still needs validation.
+  `parselmouth` is already a dependency but is not yet used.
+- GOP thresholds are hand-set rather than fitted to human scores. Accuracy and the
+  ability to rank attempts require human validation. See the linked roadmap.
 - Insertions are invisible to forced alignment. The free decode is returned alongside so
   the client can spot them, but nothing in the UI uses it yet.
-- The browser recorder still encodes to Opus before decoding back to samples, which costs
-  detail in the 4-8 kHz band where /s ʃ f θ/ differ. The scoring service is sent
-  uncompressed float32, so that loss only affects the in-browser path; capturing raw PCM
-  through an AudioWorklet would remove it there too.
+- MediaRecorder encodes the microphone recording before it is decoded for scoring.
+  Both the browser and backend receive those decoded samples. Float WAV transport
+  prevents further loss but cannot restore the original signal; raw PCM capture and
+  its measured effect on pronunciation scoring are planned.
 - In free mode the transcript is what a listener would hear, not what you intended. A badly
   mispronounced word may be transcribed as the word you actually said, scoring well; edit
   the transcript to compare against what you meant.

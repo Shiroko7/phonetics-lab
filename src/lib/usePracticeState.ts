@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 import type { Dictionary } from './dict.ts'
 import type { DisplayOptions } from './display.ts'
 import {
-  alignPhones, normalizeRecognized, scoreAlignment,
+  normalizeRecognized, scoreAlignment,
   type AlignedPhone, type Heard,
 } from './align.ts'
 import { describeSubstitution } from './phonefeatures.ts'
@@ -17,13 +17,13 @@ import {
 import { getClip, listClips, putClip, pruneClips } from './clips.ts'
 import { stop as stopSpeaking } from './speech.ts'
 import {
-  aggregate, lineProgress, recentAverage, sameLine, SCORER_REVISION,
+  aggregate, lineProgress, recentAverage, sameLine, sameScoringScale, SCORER_REVISION,
   toSentences,
   type Attempt,
 } from './practice.ts'
 import { pending as pendingRescore, rescoreAll } from './rescore.ts'
 import {
-  byWord, comparePhones, compareWords, extractVariantMap, flatten, focusScore, targetWords,
+  byWord, comparePhones, compareWords, flatten, focusScore, targetWords,
   type Change, type WordReport,
 } from './report.ts'
 import { drillIndex, type Drill, type DrillIndex } from './drills.ts'
@@ -38,6 +38,8 @@ import {
   buildDrillForWord, buildDrillForStruggledWords, type StruggledWord,
 } from './struggles.ts'
 import { clearDailyState } from './daily.ts'
+import { playbackSlice } from './playback.ts'
+import { alignWordVariants } from './wordAlignment.ts'
 
 export interface PracticeProps {
   text: string
@@ -58,10 +60,6 @@ export type Phase = 'idle' | 'recording' | 'analysing' | 'done'
 export type Track = 'target' | 'mine'
 
 export const DRILLABLE = Object.entries(PHONES).filter(([phone]) => phone !== 'ɾ' && phone !== 'ʔ')
-
-const LEAD_IN = 0.08
-const TRAIL_OUT = 0.08
-const MIN_SLICE = 0.18
 
 export interface Playback {
   url: string
@@ -115,6 +113,7 @@ export function usePracticeState({
   const context = useRef<AudioContext | null>(null)
   const decoded = useRef<AudioBuffer | null>(null)
   const source = useRef<AudioBufferSourceNode | null>(null)
+  const playbackGeneration = useRef(0)
 
   const sentences = toSentences(text)
 
@@ -140,6 +139,7 @@ export function usePracticeState({
     player.current = element
 
     return () => {
+      playbackGeneration.current++
       element.pause()
       element.removeEventListener('timeupdate', tick)
       element.removeEventListener('ended', ended)
@@ -151,6 +151,7 @@ export function usePracticeState({
   }, [playback])
 
   const silence = useCallback(() => {
+    playbackGeneration.current++
     stopSpeaking()
     const element = player.current
     if (element) {
@@ -159,7 +160,6 @@ export function usePracticeState({
     }
     const node = source.current
     if (node) {
-      node.onended = null
       try {
         node.stop()
       } catch {
@@ -208,29 +208,42 @@ export function usePracticeState({
     async (span: { start: number; end: number }) => {
       if (!playback) return
       silence()
+      const generation = playbackGeneration.current
       try {
         context.current ??= new AudioContext()
         await context.current.resume()
+        if (generation !== playbackGeneration.current) return
         if (!decoded.current) {
-          decoded.current = await context.current.decodeAudioData(await playback.blob.arrayBuffer())
+          const buffer = await context.current.decodeAudioData(await playback.blob.arrayBuffer())
+          if (generation !== playbackGeneration.current) return
+          decoded.current = buffer
         }
-
+        const slice = playbackSlice(span, decoded.current.duration, decoded.current.sampleRate)
+        if (!slice) return
         const node = context.current.createBufferSource()
         node.buffer = decoded.current
-        node.connect(context.current.destination)
+        const gain = context.current.createGain()
+        node.connect(gain)
+        gain.connect(context.current.destination)
         node.onended = () => {
+          node.disconnect()
+          gain.disconnect()
+          if (source.current !== node) return
           source.current = null
           setPlaying((track) => (track === 'mine' ? null : track))
         }
-        const totalDuration = decoded.current.duration
-        const from = Math.max(0, span.start - LEAD_IN)
-        const to = Math.min(totalDuration, span.end + TRAIL_OUT)
-        const duration = Math.max(MIN_SLICE, to - from)
-        node.start(0, from, duration)
+        const duration = slice.end - slice.start
+        const at = context.current.currentTime
+        const fade = Math.min(0.005, duration / 4)
+        gain.gain.setValueAtTime(0, at)
+        gain.gain.linearRampToValueAtTime(1, at + fade)
+        gain.gain.setValueAtTime(1, at + duration - fade)
+        gain.gain.linearRampToValueAtTime(0, at + duration)
+        node.start(at, slice.start, duration)
         source.current = node
         setPlaying('mine')
       } catch {
-        setPlaying(null)
+        if (generation === playbackGeneration.current) setPlaying(null)
       }
     },
     [playback, silence],
@@ -264,7 +277,8 @@ export function usePracticeState({
   }, [aligned, report])
 
   const earlier = useMemo(() => {
-    const others = attempts.filter((a, i) => i !== editing && sameLine(a.target, target))
+    const current = editing === null ? null : attempts[editing]
+    const others = attempts.filter((a, i) => i !== editing && sameLine(a.target, target) && (!current || sameScoringScale(a, current)))
     if (others.length === 0) return null
     return against === 'best'
       ? others.reduce((top, a) => (a.score.overall > top.score.overall ? a : top))
@@ -342,7 +356,6 @@ export function usePracticeState({
       const at = (editing !== null ? attempts[editing]?.at : undefined) ?? Date.now()
       const wordList = wordsFor(phrase)
       const expected = flatten(wordList)
-      const variantMap = extractVariantMap(wordList)
 
       const existingDuration = editing !== null ? attempts[editing]?.durationMs : undefined
       const durationMs = playback?.durationMs ?? existingDuration
@@ -353,7 +366,7 @@ export function usePracticeState({
         const blob = playback?.blob ?? (await getClip(at))?.blob
         if (blob) {
           try {
-            const remote = await analyzeRemote(await decodeToMono16k(blob), expected)
+            const remote = await analyzeRemote(await decodeToMono16k(blob), expected, wordList)
             setAligned(remote.aligned)
             updateStrugglesWithTake(phrase, remote.aligned, at)
             onAttempt(
@@ -370,17 +383,18 @@ export function usePracticeState({
               editing ?? undefined,
             )
             return
-          } catch {
-            // fallback to browser aligner
+          } catch (err) {
+            setError((err as Error).message)
+            return
           }
         }
       }
 
-      const result = alignPhones(expected, heard, variantMap)
+      const result = alignWordVariants(wordList, heard)
       setAligned(result)
       updateStrugglesWithTake(phrase, result, at)
       onAttempt(
-        { target: phrase, aligned: result, score: scoreAlignment(result), at, scorer: 'browser', durationMs, mode: attemptMode },
+        { target: phrase, aligned: result, score: scoreAlignment(result), at, scorer: 'browser', rev: SCORER_REVISION, durationMs, mode: attemptMode },
         editing ?? undefined,
       )
     },
@@ -469,14 +483,15 @@ export function usePracticeState({
       }
 
       if (backend) {
-        const wantedList = flatten(wordsFor(phrase))
+        const wordList = wordsFor(phrase)
+        const wantedList = flatten(wordList)
         if (wantedList.length === 0) {
           setError('No pronounceable words in that line, so there was nothing to score.')
           discard()
           return
         }
 
-        const remote = await analyzeRemote(taken.samples, wantedList)
+        const remote = await analyzeRemote(taken.samples, wantedList, wordList)
         setHeard(remote.free)
         setCorrected(false)
 
@@ -531,8 +546,7 @@ export function usePracticeState({
 
       const at = Date.now()
       const wordList = wordsFor(phrase)
-      const variantMap = extractVariantMap(wordList)
-      const result = alignPhones(flatten(wordList), said, variantMap)
+      const result = alignWordVariants(wordList, said)
       setAligned(result)
       updateStrugglesWithTake(phrase, result, at)
       setPhase('done')
@@ -549,6 +563,7 @@ export function usePracticeState({
         score: scoreAlignment(result),
         at,
         scorer: 'browser',
+        rev: SCORER_REVISION,
         durationMs: taken.durationMs,
         mode,
       })

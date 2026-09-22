@@ -1,11 +1,9 @@
 /**
  * Turns a phone alignment back into words.
  *
- * The comparison itself runs over a flat phone sequence, which is right for the
- * alignment and useless for the reader: a strip of forty symbols says nothing
- * about which word went wrong. Every aligned step carries the index of the
- * expected phone it belongs to, so the strip can be cut back up along word
- * boundaries and each word scored on its own.
+ * Word-aware alignment still returns canonical phone indices. Every aligned
+ * step carries the index of the expected phone it belongs to, so results can
+ * be grouped by word without inferring ownership from acoustic timestamps.
  */
 
 import {
@@ -32,7 +30,7 @@ export interface WordReport {
   ipa: string
   /** The aligned steps belonging to this word, in order. */
   steps: AlignedPhone[]
-  /** What was actually produced across those steps. */
+  /** The scorer's estimate of the sounds across those steps. */
   said: string
   /**
    * Where this word sits in the recording, in seconds — so the take can be cut
@@ -41,6 +39,9 @@ export interface WordReport {
    * carry no timings.
    */
   span: { start: number; end: number } | null
+  /** Neighboring words are intentionally included only in this replay mode. */
+  contextSpan?: { start: number; end: number } | null
+  timing?: 'estimated' | 'ambiguous' | 'unavailable'
   score: number
   verdict: Verdict
   connectedNote?: string
@@ -75,19 +76,21 @@ export function flatten(words: TargetWord[]): string[] {
   return words.flatMap((word) => word.phones)
 }
 
-/** Map of expected phone index -> set of allowed variant phones for that slot (e.g. weak vs citation forms). */
+/**
+ * Compatibility helper for callers with a flat target. Only a single changed
+ * position can safely be represented this way. Full paths use alignWordVariants.
+ */
 export function extractVariantMap(words: TargetWord[]): Map<number, Set<string>> {
   const map = new Map<number, Set<string>>()
   let phoneOffset = 0
   for (const word of words) {
-    if (word.variants && word.variants.length > 1) {
-      const alternatePhones = new Set<string>()
-      for (const v of word.variants) {
-        for (const p of expectedPhones(v)) alternatePhones.add(p)
-      }
-      for (let p = 0; p < word.phones.length; p++) {
-        map.set(phoneOffset + p, alternatePhones)
-      }
+    const alternatives = (word.variants ?? []).map(expectedPhones)
+      .filter((phones) => phones.length === word.phones.length)
+    const changed = new Set(alternatives.flatMap((phones) =>
+      phones.flatMap((p, i) => p !== word.phones[i] ? [i] : [])))
+    if (changed.size === 1) {
+      const i = [...changed][0]
+      map.set(phoneOffset + i, new Set(alternatives.map((phones) => phones[i])))
     }
     phoneOffset += word.phones.length
   }
@@ -109,15 +112,24 @@ export function byWord(words: TargetWord[], aligned: AlignedPhone[]): WordReport
     buckets[current]?.push(step)
   }
 
+  const spans = buckets.map((steps) => spanOf(steps.filter((step) => step.expectedIndex !== null)))
+  const context = buckets.map(spanOf)
   return words.map((word, index) => {
     const steps = buckets[index]
     const score = steps.length === 0 ? 0 : scoreAlignment(steps).overall
+    const span = spans[index]
+    // A shared acoustic span cannot truthfully be offered as an isolated word.
+    // Check every other word, including spans separated by an untimed word.
+    const overlaps = !!span && spans.some((other, i) => i !== index && other && other.start < span.end && other.end > span.start)
+    const neighbors = context.slice(Math.max(0, index - 1), index + 2).filter((s) => s !== null)
     return {
       text: word.text,
       ipa: word.ipa,
       steps,
       said: steps.map((step) => step.actual ?? '').filter(Boolean).join(' '),
-      span: spanOf(steps),
+      span: overlaps ? null : span,
+      contextSpan: neighbors.length ? { start: Math.min(...neighbors.map((s) => s.start)), end: Math.max(...neighbors.map((s) => s.end)) } : null,
+      timing: overlaps ? 'ambiguous' : span ? 'estimated' : 'unavailable',
       score,
       verdict: verdictFor(steps),
       connectedNote: word.connectedNote,
@@ -126,19 +138,12 @@ export function byWord(words: TargetWord[], aligned: AlignedPhone[]): WordReport
   })
 }
 
-/**
- * The colour a word gets. Structural rather than a score threshold, because the
- * arithmetic is misleading at word scale: *think* said as *sink* is one close
- * miss in four sounds, which scores 88 and would show green — on a word the
- * listener just heard as a different word. Green has to mean every sound
- * landed; amber, a sound that drifted; red, a sound that is wrong or absent.
- */
 /** The stretch of recording a word's sounds occupy, if they are timed at all. */
 function spanOf(steps: AlignedPhone[]): { start: number; end: number } | null {
   let start = Infinity
   let end = -Infinity
   for (const step of steps) {
-    if (step.start === null || step.end === null) continue
+    if (step.start === null || step.end === null || !Number.isFinite(step.start) || !Number.isFinite(step.end) || step.end <= step.start) continue
     if (step.start < start) start = step.start
     if (step.end > end) end = step.end
   }
@@ -203,6 +208,7 @@ export function compareWords(now: WordReport[], before: WordReport[]): (number |
   })
 }
 
+/** Word colour follows the worst phone verdict, not an average numerical score. */
 export function verdictFor(steps: AlignedPhone[]): Verdict {
   if (steps.some((s) => s.verdict === 'wrong' || s.verdict === 'missing')) return 'poor'
   if (steps.some((s) => s.verdict === 'close' || s.verdict === 'extra')) return 'ok'
