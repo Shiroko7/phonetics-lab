@@ -68,6 +68,8 @@ class TranscribeResponse(BaseModel):
 
 class Health(BaseModel):
     ok: bool = True
+    scorer_revision: int = SCORER_REVISION
+    phoneme_model_revision: str | None = None
     device: str
     cuda: bool
     gpu: str | None = None

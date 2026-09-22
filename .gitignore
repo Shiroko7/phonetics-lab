@@ -9,3 +9,21 @@ tsconfig.tsbuildinfo
 backend/.venv
 __pycache__
 *.pyc
+
+# Downloaded resources and generated derivatives are not project source.
+/.cache/
+/public/dict/
+/datasets/
+/models/
+/recordings/
+*.onnx
+*.safetensors
+*.pt
+*.pth
+*.wav
+*.flac
+*.mp3
+*.webm
+.env
+.env.*
+!.env.example

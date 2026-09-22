@@ -59,6 +59,7 @@ def health() -> Health:
         gpu=torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
         torch=torch.__version__,
         phoneme_model=PHONEME_MODEL,
+        phoneme_model_revision=MODELS.phoneme_revision,
         word_model=WORD_MODEL,
         phonemes_loaded=MODELS.phonemes_ready,
         words_loaded=MODELS.words_ready,

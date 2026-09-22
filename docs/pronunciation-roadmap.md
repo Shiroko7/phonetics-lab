@@ -4,6 +4,16 @@ Research reviewed 2026-09-21; implementation updated 2026-09-22.
 Goal: trustworthy feedback on American English pronunciation,
 with word replay that does not deliberately include neighboring speech.
 
+Resource policy: original project code is Apache-2.0; third-party data retains its
+own terms. Dictionary tables are now installed locally from pinned, checksummed
+sources, with an explicit personal-use acknowledgment for the legacy word list.
+An opt-in, local-only speechocean762 pilot is now available and has been evaluated.
+See [the resource/license inventory](../THIRD_PARTY.md)
+for usage constraints, model provenance gaps, and the distinction between keeping
+data out of Git and redistributing it in a build. A commercially cleared, spoken-
+language frequency source is still needed before claiming a commercial-ready data
+configuration.
+
 ## What is implemented
 
 Revision 2 is a reliability baseline, not a validated accuracy improvement on human speech.
@@ -75,6 +85,18 @@ and local aligner adapters. Do not replace the scorer based on prettier demos or
 average scores. Raising every score can reduce false rejections while accepting errors.
 
 ## Phase 1: collect evidence before selecting a winner
+
+**Status: in progress.** The [human-benchmark guide](human-benchmarks.md) records the
+implemented public-corpus importer, five-rater label preservation, reproducible local
+runner and the first real-data baseline: 100 speakers / 632 words, with Pearson
+correlations of 0.455 for sentence accuracy and 0.336 for word accuracy. These are
+not accuracy percentages. Prosody/fluency/stress predictions and human word-boundary
+validation are still absent. No scoring thresholds were tuned on this pilot.
+
+Remaining phase-1 work includes development/calibration splits, manually timed
+evidence, representative personal/native-US recordings, independent adjudication,
+candidate comparisons and a locked final test. The guide also documents the parallel
+spoken-frequency, sentence-coverage and nonrepetition practice-library track.
 
 Start with 100–200 short recordings as a pilot, including the user's problem cases and
 native American English controls. This is a starting regression corpus, not enough to
