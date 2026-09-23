@@ -1,5 +1,6 @@
 /**
- * Re-scoring attempts that were graded before the scoring service existed.
+ * Re-score saved audio with the current local service, including a one-time
+ * refresh of older revision-2 recordings and an explicit force-all action.
  *
  * The browser scorer and the service are not on the same scale. One counts
  * verdicts off a free decode, the other averages per-phone goodness-of-
@@ -8,23 +9,16 @@
  * history panel draws trends across attempts, and a line that appears to have
  * improved from 68 to 96 may only have changed scorer halfway through.
  *
- * So old attempts are brought forward rather than left to be averaged in. The
- * audio is still there — `pruneClips` only drops a clip when its attempt is
- * gone — so this reads each take back out of IndexedDB, decodes it to the same
- * samples the original analysis saw, and asks the service the better question.
- * Nothing is re-recorded.
+ * Audio is read from IndexedDB and decoded without re-recording. Current scores
+ * replace derived analysis, while original assessments and timestamps survive.
+ * The active controller backs up storage and commits each result with a
+ * compare-and-swap merge against the latest history. It never replaces the list.
  *
- * This runs itself, once, when the app opens with the service available. A
- * score is derived from a recording and the recordings are untouched, so
- * improving the derivation is a migration rather than a decision to put to
- * anyone. `SCORER_REVISION` is what drives it: raise that and every attempt
- * below it comes back through here on the next load. `rescoreOne` is exported
- * for the narrower case of redoing a single attempt on demand.
+ * The assessment-processing marker avoids repeating a successful refresh on
+ * every load. Missing audio, invalid speech and unavailable services do not
+ * receive that marker. The UI reports these explicitly and supports retrying.
  *
- * An attempt whose audio did not survive keeps its old score and stays tagged
- * as the browser's, which is the honest outcome: it cannot be brought onto the
- * new scale, and pretending otherwise would put a number next to it that no
- * scorer ever produced.
+ * Unavailable recordings keep their previous scores and scorer/revision tags.
  */
 
 import { analyze as analyzeRemote } from './backend.ts'
@@ -33,7 +27,8 @@ import { getClip } from './clips.ts'
 import type { Dictionary } from './dict.ts'
 import { decodeToMono16k } from './recorder.ts'
 import { flatten, targetWords } from './report.ts'
-import { isCurrent, SCORER_REVISION, type Attempt } from './practice.ts'
+import { isRefreshed, SCORER_REVISION, type Attempt } from './practice.ts'
+import { preserveAssessment } from './assessmentHistory.ts'
 
 /** Why one attempt could not be brought onto the new scale. */
 export interface Skipped {
@@ -49,9 +44,18 @@ export interface RescoreResult {
   skipped: Skipped[]
 }
 
+export interface RescoreOptions {
+  force?: boolean
+  /** Commit each completed recording against the latest history, not a snapshot. */
+  onUpdate?: (before: Attempt, updated: Attempt) => boolean
+  onSkipped?: (item: Skipped) => void
+  scoreAttempt?: typeof rescoreOne
+  signal?: AbortSignal
+}
+
 /** How many of these are not on the current scale, audio permitting. */
 export function pending(attempts: Attempt[]): number {
-  return attempts.filter((attempt) => !isCurrent(attempt)).length
+  return attempts.filter((attempt) => !isRefreshed(attempt)).length
 }
 
 /**
@@ -65,28 +69,39 @@ export async function rescoreAll(
   attempts: Attempt[],
   dict: Dictionary,
   onProgress?: (done: number, total: number) => void,
+  options: RescoreOptions = {},
 ): Promise<RescoreResult> {
   const todo = attempts
     .map((attempt, index) => ({ attempt, index }))
-    .filter(({ attempt }) => !isCurrent(attempt))
+    .filter(({ attempt }) => options.force || !isRefreshed(attempt))
 
   const next = [...attempts]
   const skipped: Skipped[] = []
+  const skip = (item: Skipped) => { skipped.push(item); options.onSkipped?.(item) }
   let rescored = 0
   let done = 0
 
   for (const { attempt, index } of todo) {
+    if (options.signal?.aborted) break
+    let updated: Attempt
     try {
-      const updated = await rescoreOne(attempt, dict)
-      next[index] = updated
-      rescored += 1
+      updated = await (options.scoreAttempt ?? rescoreOne)(attempt, dict)
     } catch (err) {
-      skipped.push({
+      skip({
         at: attempt.at,
         target: attempt.target,
         reason: (err as Error).message,
       })
+      done += 1
+      onProgress?.(done, todo.length)
+      continue
     }
+    if (options.signal?.aborted) break
+    // Persistence failures abort the batch; never silently report unsaved results.
+    if (!options.onUpdate || options.onUpdate(attempt, updated)) {
+      next[index] = updated
+      rescored += 1
+    } else skip({ at: attempt.at, target: attempt.target, reason: 'Recording changed or was deleted during recalculation; newer history was kept.' })
     done += 1
     onProgress?.(done, todo.length)
   }
@@ -106,7 +121,7 @@ export async function rescoreOne(attempt: Attempt, dict: Dictionary): Promise<At
   const samples = await decodeToMono16k(clip.blob)
   const remote = await analyzeRemote(samples, expected, words)
 
-  return {
+  return preserveAssessment(attempt, {
     ...attempt,
     aligned: remote.aligned,
     // Verdict tallies from the shared scorer so the weak-sound report keeps
@@ -114,5 +129,5 @@ export async function rescoreOne(attempt: Attempt, dict: Dictionary): Promise<At
     score: { ...scoreAlignment(remote.aligned), overall: remote.overall },
     scorer: 'gop',
     rev: SCORER_REVISION,
-  }
+  }, 'history-rescore')
 }

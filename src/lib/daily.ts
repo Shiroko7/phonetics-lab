@@ -14,6 +14,17 @@ export type CardKind = 'sound' | 'word'
 export type CardState = 'new' | 'learning' | 'review' | 'relearning' | 'suspended'
 export type ReviewRating = 'again' | 'hard' | 'good' | 'easy'
 
+export interface CurrentDailyAssessment {
+  overallScore: number
+  focusScore?: number
+  rating: ReviewRating
+  assessed: boolean
+  scorer: string
+  revision: number
+  updatedAt: number
+  practiceThreshold: number
+}
+
 export interface DailyCard {
   id: string
   kind: CardKind
@@ -36,6 +47,8 @@ export interface DailyCard {
   promptHistory?: string[]
   lastRating?: ReviewRating
   lastScore?: number
+  /** Current analysis no longer flags this target; its schedule/history is retained. */
+  analysisInactive?: boolean
 }
 
 export interface ReviewEvent {
@@ -51,6 +64,7 @@ export interface ReviewEvent {
   intervalBeforeDays: number
   intervalAfterDays: number
   dueAt: number
+  currentAssessment?: CurrentDailyAssessment
 }
 
 export interface DailySession {
@@ -245,7 +259,7 @@ export function findOpenSession(state: DailyState, date = localDateKey()): Daily
 }
 
 function due(card: DailyCard, now: number): boolean {
-  return card.state !== 'suspended' && card.dueAt <= now
+  return card.state !== 'suspended' && !card.analysisInactive && card.dueAt <= now
 }
 
 /** Due cards first, with a small daily intake of new targets. */

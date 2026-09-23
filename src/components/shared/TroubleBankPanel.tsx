@@ -155,6 +155,7 @@ export function TroubleBankPanel({ practice, layout = 'compact' }: Props) {
                 <div className="trouble-stats-row">
                   <span className="attempts-tag">
                     {entry.struggleCount}/{entry.totalAttempts} first takes flagged
+                    {!!entry.legacyAttempts && ` · ${entry.legacyAttempts} legacy takes (first/retry unknown)`}
                   </span>
                   {entry.lastScore > 0 && (
                     <span className={`score-mini-tag ${band(entry.lastScore, practice.practiceThreshold)}`}>

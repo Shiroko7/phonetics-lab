@@ -206,7 +206,11 @@ try {
   assert(await evaluate(`![...document.querySelectorAll('.inspection-audio-actions button')].some(b => b.textContent.includes('Yours'))`), 'bad cuts disable isolated replay')
   assert(await evaluate(`[...document.querySelectorAll('.phone-slot')].every(p => p.classList.contains('unscored'))`), 'bad cuts are unassessed, not pronunciation errors')
   await waitFor(`Object.values((${current}).practiceReviews ?? {}).some(choices => choices.includes('bad-cut'))`, 'Daily keeps review choice separate')
-  assert.deepEqual(await evaluate(`(${current}).events.find(event => event.kind === 'production')`), firstProductionEvidence, 'review choices preserve original Daily evidence')
+  // Current analysis is a derived overlay; original event fields remain immutable.
+  const originalEvidence = ({ currentAssessment, ...original }) => original
+  const reviewedProduction = await evaluate(`(${current}).events.find(event => event.kind === 'production')`)
+  assert.deepEqual(originalEvidence(reviewedProduction), originalEvidence(firstProductionEvidence), 'review choices preserve original Daily evidence')
+  assert.equal(reviewedProduction.currentAssessment?.overallScore, 73, 'current assessment also preserves the acoustic score')
   await click('Undo review choice')
   await evaluate(`document.querySelector('.split-settings-btn').click()`)
   await waitFor(`!!document.querySelector('#practice-threshold')`, 'threshold settings')

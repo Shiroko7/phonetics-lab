@@ -151,11 +151,10 @@ Limitations:
    refuse the final partition. Calibration and validation each have a measured
    100-recording baseline, but no calibration is fitted. Repeatedly inspecting test
    errors makes the old pilot unsuitable as an untouched final test.
-2. **Add real boundary evidence.** The local-only L2-ARCTIC manual-subset adapter and
-   evaluator now preserve independent pronunciation judgments, uncertainty ranges,
-   neighbor leakage and target clipping. Still obtain the corpus under its provider's
-   terms, inspect the import and run prediction comparisons. Tests of the adapter are
-   not human timing results. Never use the automatic `textgrid/` tier as human gold.
+2. **Initial boundary evidence is measured.** The obtained L2-ARCTIC v5.0 manual
+   subset now supplies a [100-recording / 975-word baseline](word-boundary-baseline.md).
+   Keep that selection frozen for candidate comparisons. Full-corpus and final-test
+   accuracy remain unmeasured. Automatic `textgrid/` labels are not human gold.
 3. **Add the personal pilot.** Collect 100–200 consented, pseudonymous recordings
    spanning connected speech, reductions, difficult boundaries, common contrasts,
    varied rates and devices, plus native-US controls. Have two raters work blind to

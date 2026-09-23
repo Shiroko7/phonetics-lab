@@ -1,7 +1,9 @@
 # Sound-focused practice feedback
 
 This is a practice workflow, not a new acoustic model or fitted calibration.
-Scorer revision 2 and all saved numerical scores remain unchanged.
+The practice threshold itself does not change acoustic scores. Scorer revision 2
+remains current; [history recalculation](history-recalculation.md) can now refresh
+every saved recording from audio and propagate its latest assessment across the app.
 
 ## How to use it
 
@@ -42,7 +44,8 @@ gave its maximum score, not that human listeners would unanimously call it perfe
 ## Recurring sounds and the word queue
 
 The **Sounds to check over time** panel appears in Trouble Words and Stats. It uses
-the latest take's scorer/revision only, across retained local history. It counts each
+the current local scorer/revision when available (otherwise the latest available
+scale), across retained local history. It counts each
 sound and each word at most once per first take, even if repeated in the sentence.
 A “recurring flag” means at least two flagged first takes across different sentence
 contexts or sessions. This is a transparent practice heuristic, not a validated
@@ -55,10 +58,12 @@ the recurring-sound tally, but their latest assessed result can clear a word fro
 review queue. Reopening a recording does not create a new observation.
 
 Older takes without this metadata are explicitly excluded from first-take statistics;
-we cannot reconstruct their independence. Their audio, scores and legacy trouble-bank
-storage remain intact. The active word queue is derived from latest compatible takes
-and manual pins, so it may differ from the old accumulated list. Its word score and
-context describe the latest flagged occurrence, not a reconstructed lifetime history.
+we cannot reconstruct their independence. Their current analyses still contribute to
+word histories and provisional Daily targets, labeled as legacy takes. Original
+assessments are retained when re-scoring, and legacy trouble-bank storage remains.
+The active word queue is derived from latest compatible takes and manual pins, so
+it may differ from the old accumulated list. Word score histories are rebuilt from
+retained, compatible assessments, not invented lifetime evidence.
 Removing a queue item hides earlier flags until a new take; removing a pin or clearing
 the queue is still an explicit user action.
 
@@ -68,9 +73,11 @@ without counting as an objectively successful review. A choice for one word cann
 hide an unresolved flag in another word. Historical events keep the threshold and
 practice-policy revision used when recorded. Changing Settings does not rewrite them.
 
-Historical Stats charts still summarize original model verdicts and may include
-retries; they are labeled separately from the new first-take review panel. The latter
-is all retained history, independent of the historical chart's date filter.
+Stats charts summarize latest compatible model assessments and may include retries;
+they are labeled separately from the independent first-take panel. The latter covers
+retained compatible history, independent of the historical chart's date filter.
+Daily speech history projects recalculated scores where available while preserving
+the original event fields and earned scheduling history.
 
 ## Evidence and limits
 
@@ -81,7 +88,8 @@ slots were flagged too. Thus a below-80 score is a useful candidate for listenin
 concerns as incorrect. See [the benchmark report](human-benchmarks.md#phone-flag-pilot)
 for mapping exclusions, counts and population limitations.
 
-Next accuracy work remains human-marked word boundaries, representative recordings,
-development/calibration splits and candidate scorer comparisons. Stress, rhythm and
+Next accuracy work remains human-marked word boundaries, representative recordings
+and candidate scorer comparisons; development/calibration splits are now implemented.
+Stress, rhythm and
 intonation are not assessed yet. No dataset, recording or licensed content is added
 to Git by this workflow.

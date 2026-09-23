@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, resolve, join } from 'node:path'
 import { makeSplitPlan, validatePlan, assertNotReserved, loadSelection, PROTOCOL } from './benchmark-splits.mjs'
 import { ROOT, jsonl, sha256 } from './prepare-speechocean.mjs'
-import { parseTextGrid, boundaryRow, importLocalBoundaries, wavInfo } from './import-l2-arctic.mjs'
+import { parseTextGrid, boundaryRow, importLocalBoundaries, wavInfo, selectBoundaryCandidates } from './import-l2-arctic.mjs'
 import { evaluateBoundaries } from './evaluate-boundaries.mjs'
 
 const training = Array.from({ length: 40 }, (_, i) => ({ id: `train-${i}`, speaker: `t${i % 10}` }))
@@ -47,6 +47,16 @@ try {
   assert.equal(dirname(temp), tmpdir()); assert(temp.includes('phonetics-splits-test-'))
   await rm(temp, { recursive: true, force: true })
 }
+
+// Shared filenames must not force every speaker to read the same pilot sentence.
+const boundaryPool = Array.from({ length: 24 }, (_, s) => Array.from({ length: 20 }, (_, i) => ({ speaker: `speaker-${s}`, name: `arctic_a${String(i).padStart(4, '0')}.TextGrid` }))).flat()
+const boundaryV1 = selectBoundaryCandidates(boundaryPool, 24, 'v1')
+const boundaryV2 = selectBoundaryCandidates(boundaryPool, 24)
+assert.equal(new Set(boundaryV1.map(r => r.name)).size, 1, 'legacy selection stays reproducible')
+assert(new Set(boundaryV2.map(r => r.name)).size > 10, 'speaker-qualified ranks diversify a shared prompt pool')
+assert.equal(new Set(boundaryV2.map(r => r.speaker)).size, 24, 'speaker round-robin remains balanced')
+assert.deepEqual(selectBoundaryCandidates([...boundaryPool].reverse(), 24), boundaryV2)
+assert.throws(() => selectBoundaryCandidates(boundaryPool, 24, 'future'), /Unknown/)
 
 // Original fixture, not a copied corpus sentence or annotation.
 const textGrid = (tiers = [

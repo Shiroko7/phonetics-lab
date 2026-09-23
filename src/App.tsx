@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { analyze } from './lib/analyze.ts'
 import { loadDictionary, type Dictionary } from './lib/dict.ts'
 import { DEFAULT_DISPLAY, type DisplayOptions } from './lib/display.ts'
@@ -13,8 +13,9 @@ import {
   type Voice,
 } from './lib/speech.ts'
 import type { Annotation } from './components/Reading.tsx'
-import { loadAttempts, saveAttempts, type Attempt } from './lib/practice.ts'
+import { HISTORY_BACKUP_KEY, HISTORY_KEY, loadAttempts, saveAttempts, type Attempt } from './lib/practice.ts'
 import { clearClips, deleteClip } from './lib/clips.ts'
+import { mergeAssessment, preserveAssessment } from './lib/assessmentHistory.ts'
 import { usePracticeState } from './lib/usePracticeState.ts'
 import { SplitLab } from './components/SplitLab.tsx'
 import { useVoicePreferences } from './lib/useVoicePreferences.ts'
@@ -57,6 +58,9 @@ export default function App() {
 
   const [drillSound, setDrillSound] = useState<string | null>(null)
   const [attempts, setAttempts] = useState<Attempt[]>(() => loadAttempts())
+  const attemptsRef = useRef(attempts)
+  const persistedHistoryRef = useRef<string | null | undefined>(undefined)
+  if (persistedHistoryRef.current === undefined) persistedHistoryRef.current = readStored(HISTORY_KEY)
   const [voices, setVoices] = useState<Voice[]>([])
   const [voiceURI, setVoiceURI] = useState('')
   const [readingAloud, setReadingAloud] = useState(false)
@@ -134,38 +138,46 @@ export default function App() {
     synthesise(text, { rate, voiceURI, onEnd: () => setReadingAloud(false) })
   }, [readingAloud, text, rate, voiceURI, voiceAllowed])
 
-  const recordAttempt = useCallback((attempt: Attempt, replaceAt?: number) => {
-    setAttempts((previous) => {
-      const next =
-        replaceAt !== undefined && replaceAt >= 0 && replaceAt < previous.length
-          ? previous.map((existing, i) => (i === replaceAt ? attempt : existing))
-          : [...previous, attempt]
-      saveAttempts(next)
-      return next
-    })
+  const persistAttempts = useCallback((next: Attempt[]) => {
+    if (localStorage.getItem(HISTORY_KEY) !== persistedHistoryRef.current) {
+      throw new Error('History changed in another tab. Reload this page before continuing; the newer saved history was not overwritten.')
+    }
+    if (!saveAttempts(next)) throw new Error('Browser storage is full or blocked. The previous saved history was kept; export a backup before freeing space.')
+    persistedHistoryRef.current = localStorage.getItem(HISTORY_KEY)
+    attemptsRef.current = next
+    setAttempts(next)
   }, [])
 
-  const replaceAttempts = useCallback((next: Attempt[]) => {
-    setAttempts(next)
-    saveAttempts(next)
-  }, [])
+  const recordAttempt = useCallback((attempt: Attempt, replaceAt?: number) => {
+    const previous = attemptsRef.current
+    if (replaceAt !== undefined) {
+      const original = previous.find(a => a.at === attempt.at)
+      if (!original) throw new Error('This recording was deleted while analysis was running; it was not restored.')
+      persistAttempts(previous.map(a => a.at === attempt.at ? preserveAssessment(original, attempt, 'text-edit') : a))
+    } else persistAttempts([...previous, attempt])
+  }, [persistAttempts])
+
+  const updateAssessment = useCallback((before: Attempt, updated: Attempt): boolean => {
+    const current = attemptsRef.current
+    const next = mergeAssessment(current, before, updated)
+    if (next === current) return false
+    persistAttempts(next)
+    return true
+  }, [persistAttempts])
 
   const deleteAttempt = useCallback((index: number) => {
-    setAttempts((previous) => {
-      const removed = previous[index]
-      if (!removed) return previous
-      const next = previous.filter((_, i) => i !== index)
-      saveAttempts(next)
+    const previous = attemptsRef.current, removed = previous[index]
+    if (!removed) return
+    try {
+      persistAttempts(previous.filter((_, i) => i !== index))
       void deleteClip(removed.at)
-      return next
-    })
-  }, [])
+    } catch (err) { setError((err as Error).message) }
+  }, [persistAttempts])
 
   const clearHistory = useCallback(() => {
-    setAttempts([])
-    saveAttempts([])
-    void clearClips()
-  }, [])
+    try { persistAttempts([]); localStorage.removeItem(HISTORY_BACKUP_KEY); void clearClips() }
+    catch (err) { setError((err as Error).message) }
+  }, [persistAttempts])
 
   // Practice controller hook
   const practice = usePracticeState({
@@ -176,7 +188,7 @@ export default function App() {
     drill: drillSound,
     onDrillStarted: () => setDrillSound(null),
     onAttempt: recordAttempt,
-    onReplaceAttempts: replaceAttempts,
+    onAssessment: updateAssessment,
     onClearHistory: clearHistory,
     onDeleteAttempt: deleteAttempt,
     onSpeak: (phrase, onEnd, onError) => {
@@ -189,7 +201,7 @@ export default function App() {
     <div className="app">
       {error && (
         <div className="panel error" style={{ margin: '20px auto', maxWidth: 800 }}>
-          {error} — run <code>npm run dict</code> to build the dictionary, then reload.
+          {error}
         </div>
       )}
 

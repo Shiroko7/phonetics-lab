@@ -32,6 +32,17 @@ export type Scorer = 'browser' | 'gop'
  */
 export const SCORER_REVISION = ANALYSIS_REVISION
 
+/** History processing version, independent of the acoustic scoring revision. */
+export const ASSESSMENT_VERSION = 1
+
+export interface SavedAssessment {
+  target: string
+  aligned: AlignedPhone[]
+  score: Score
+  scorer?: Scorer
+  rev?: number
+}
+
 export interface Attempt {
   /** The phrase that was practised. */
   target: string
@@ -48,6 +59,9 @@ export interface Attempt {
   /** Practice provenance, independent of the acoustic scoring revision. */
   practiceSession?: string
   practiceFirst?: boolean
+  /** Earliest assessment retained before any reanalysis or text correction. */
+  originalAssessment?: SavedAssessment
+  assessment?: { version: number; at: number; source: 'recording' | 'history-rescore' | 'text-edit' }
 }
 
 export function scorerOf(attempt: Attempt): Scorer {
@@ -61,6 +75,17 @@ export function sameScoringScale(a: Attempt, b: Attempt): boolean {
 /** Whether an attempt's numbers came from the scoring service as it stands now. */
 export function isCurrent(attempt: Attempt): boolean {
   return scorerOf(attempt) === 'gop' && attempt.rev === SCORER_REVISION
+}
+
+export function isRefreshed(attempt: Attempt): boolean {
+  return isCurrent(attempt) && attempt.assessment?.version === ASSESSMENT_VERSION
+}
+
+/** Prefer the current local scorer; never average old/browser scales into it. */
+export function analysisAttempts(attempts: Attempt[]): Attempt[] {
+  const latest = [...attempts].sort((a, b) => a.at - b.at).at(-1)
+  const reference = attempts.find(isCurrent) ?? latest
+  return reference ? attempts.filter((a) => sameScoringScale(a, reference)) : []
 }
 
 /** True when a run of attempts mixes the two scales, so trends across them lie. */
@@ -82,8 +107,14 @@ export interface PhoneStat {
   errorRate: number
 }
 
-const HISTORY_KEY = 'phonetics-lab:attempts'
-const MAX_ATTEMPTS = 500
+export const HISTORY_KEY = 'phonetics-lab:attempts'
+export const HISTORY_BACKUP_KEY = 'phonetics-lab:attempts:before-history-refresh-v1'
+
+/** Write once, before reanalysis. A failed backup must stop the refresh. */
+export function backupAttempts(): void {
+  if (localStorage.getItem(HISTORY_BACKUP_KEY) !== null) return
+  localStorage.setItem(HISTORY_BACKUP_KEY, localStorage.getItem(HISTORY_KEY) ?? '[]')
+}
 
 export function loadAttempts(): Attempt[] {
   try {
@@ -97,18 +128,22 @@ export function loadAttempts(): Attempt[] {
       // Restore it without inventing acoustic evidence or changing revision.
       const aligned = attempt.aligned.map((step) => step.score === undefined && step.distance !== null
         ? { ...step, score: Math.round(100 * (1 - step.distance)) } : step)
-      return { ...attempt, aligned, score: scoreAlignment(aligned) }
+      return aligned.some((step, i) => step !== attempt.aligned[i]) ? { ...attempt, aligned, score: scoreAlignment(aligned),
+        originalAssessment: attempt.originalAssessment ?? { target: attempt.target, aligned: attempt.aligned, score: attempt.score, scorer: attempt.scorer, rev: attempt.rev } } : attempt
     })
   } catch {
     return []
   }
 }
 
-export function saveAttempts(attempts: Attempt[]): void {
+export function saveAttempts(attempts: Attempt[]): boolean {
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(attempts.slice(-MAX_ATTEMPTS)))
+    // Never silently evict history while refreshing it. Keep the previous value
+    // if storage is full, and let the caller report failure before updating UI.
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(attempts))
+    return true
   } catch {
-    // History is a convenience; a full or blocked store must not break practice.
+    return false
   }
 }
 

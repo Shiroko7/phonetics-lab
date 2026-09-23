@@ -11,7 +11,7 @@
  * - Session tracking, practice time, daily consistency and retention
  */
 
-import type { Attempt } from './practice.ts'
+import { analysisAttempts, type Attempt } from './practice.ts'
 import { FEATURES, describeSubstitution, type Manner, type Place, type Features } from './phonefeatures.ts'
 import { PHONES } from './phones.ts'
 import type { StruggledWord, StruggleHistoryEntry } from './struggles.ts'
@@ -378,7 +378,7 @@ export function analyzeStats(
   dict?: Dictionary | null,
 ): FullAnalyticsSummary {
   // Sort attempts chronologically
-  const chronologicalAttempts = [...allAttempts].sort((a, b) => a.at - b.at)
+  const chronologicalAttempts = analysisAttempts(allAttempts).sort((a, b) => a.at - b.at)
 
   // Filter attempts in selected range
   const filteredAttempts = chronologicalAttempts.filter((a) => isWithinRange(a.at, range, now))
@@ -473,7 +473,7 @@ export function analyzeStats(
   // Daily reviews stats in range
   const filteredReviews = dailyState.reviews.filter((r) => isWithinRange(r.reviewedAt, range, now))
   const dailyReviewsCount = filteredReviews.length
-  const dailySuccessfulCount = filteredReviews.filter((r) => r.rating !== 'again').length
+  const dailySuccessfulCount = filteredReviews.filter((r) => r.rating !== 'again' && r.currentAssessment?.assessed !== false).length
   const dailySuccessRate = dailyReviewsCount ? Math.round((dailySuccessfulCount / dailyReviewsCount) * 100) : 0
 
   // 2. Phoneme Occurrences & Evolution Over Time
@@ -1296,7 +1296,7 @@ export function analyzeStats(
       dayMap.set(dKey, day)
     }
     day.dailyReviewsCount++
-    if (r.rating !== 'again') day.dailySuccessCount++
+    if (r.rating !== 'again' && r.currentAssessment?.assessed !== false) day.dailySuccessCount++
   }
 
   // Compute average score for each day

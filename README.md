@@ -19,6 +19,12 @@ The [pronunciation accuracy roadmap](docs/pronunciation-roadmap.md) records the
 implemented reliability fixes, remaining limitations, evaluation protocol, and
 longer-term alignment, scoring, prosody and audio-capture work.
 
+To refresh existing recordings, see [history recalculation](docs/history-recalculation.md).
+With the local scorer running, old history gets a one-time reanalysis. The workspace
+shows progress, failures and a **Recalculate all** button. Updated assessments feed
+diagnostics, Trouble Words, Stats and Daily; original assessments and session history
+are retained. Missing audio is reported, not replaced with a guessed score.
+
 ## Running it
 
 ```bash
@@ -78,8 +84,19 @@ For new development work, use the [evaluation foundation guide](docs/evaluation-
 groups and reserves unexposed final-test speakers. Explicit `--partition` options
 prepare and run development subsets without consuming that holdout. The guide also
 documents the new measured baselines, phone-rubric breakdown, and optional local
-L2-ARCTIC manual-boundary importer. Human word-cut measurements still require that
-separately obtained corpus; no aligner/scorer replacement is claimed yet.
+L2-ARCTIC manual-boundary importer. A [real word-boundary baseline](docs/word-boundary-baseline.md)
+now covers 100 recordings / 24 speakers / 975 words from the obtained v5.0 corpus:
+59.6 ms mean boundary error and 115.2 ms mean annotated target time clipped per word.
+This measures the existing limitation; no aligner/scorer replacement is claimed yet.
+
+`npm run benchmark:validate` now compares a calibration-selected review cutoff
+with the current policy using those archived human ratings, without new annotation
+or inference. It writes readable reports, diagnostic examples and speaker-bootstrap
+intervals. The first candidate failed the recall-loss gate, so the app default
+remains unchanged. A local boundary inference runner and candidate-output comparison
+are also ready. See [automated validation](docs/automated-validation.md) for commands,
+measured results and candidate-comparison workflow. Human labels come from dataset annotators;
+learners do not have to grade their own recordings.
 
 `make check` runs both regression suites, `make build` produces a static `dist/` you can
 host subject to its resources' terms. Vite includes the generated `public/dict/`
@@ -95,14 +112,13 @@ It exists because the browser and the GPU can afford different answers to the sa
 question — see [How the comparison works](#how-the-comparison-works). If it is not running
 the app never mentions it beyond a one-line hint.
 
-The first time it is available, attempts scored without it are quietly re-measured from
-their stored recordings, one at a time, and the history panel says so while it happens. A
-score is derived from a recording and the recordings are untouched, so improving the
-derivation is a migration rather than a question to put to anybody. `SCORER_REVISION` in
-`practice.ts` drives it: raise it whenever the service starts producing different numbers
-for the same audio — recalibrated thresholds, a new model — and the history re-measures
-itself on the next load. An attempt whose audio no longer exists keeps its old score and
-stays marked as being on the older scale.
+With the service available, saved recordings without the current assessment-processing
+marker are reanalyzed one at a time. A visible workspace banner reports progress and
+failures; **Recalculate all** can rerun even current recordings. Original assessments
+are preserved, history is backed up before the first pass, and results are merged per
+recording without replacing a stale history snapshot. `SCORER_REVISION` tracks changes
+to acoustic scoring separately from the history-processing version. Missing audio keeps
+its prior score and provenance and is reported as not recalculated.
 
 | | in the browser | with the service |
 |---|---|---|

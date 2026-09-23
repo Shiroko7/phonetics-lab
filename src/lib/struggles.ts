@@ -41,6 +41,8 @@ export interface StruggledWord {
   struggleCount: number
   /** Total number of attempts that included this word */
   totalAttempts: number
+  /** Older takes with unknown first/retry status; never counted as independent evidence. */
+  legacyAttempts?: number
   /** Lowest score recorded for this word (0-100) */
   lowestScore: number
   /** Most recent score recorded for this word (0-100) */

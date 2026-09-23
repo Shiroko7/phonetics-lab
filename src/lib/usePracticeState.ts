@@ -11,17 +11,17 @@ import {
 } from './asr.ts'
 import { decodeToMono16k, Recorder } from './recorder.ts'
 import {
-  analyze as analyzeRemote, probe as probeBackend, transcribe as transcribeRemote,
+  analyze as analyzeRemote, probe as probeBackend, reprobe, transcribe as transcribeRemote,
   type BackendInfo,
 } from './backend.ts'
-import { getClip, listClips, putClip, pruneClips } from './clips.ts'
+import { getClip, listClips, putClip } from './clips.ts'
 import { stop as stopSpeaking } from './speech.ts'
 import {
-  lineProgress, recentAverage, sameLine, sameScoringScale, SCORER_REVISION,
+  analysisAttempts, ASSESSMENT_VERSION, backupAttempts, isRefreshed, lineProgress, recentAverage, sameLine, sameScoringScale, SCORER_REVISION,
   toSentences,
   type Attempt,
 } from './practice.ts'
-import { pending as pendingRescore, rescoreAll } from './rescore.ts'
+import { pending as pendingRescore, rescoreAll, type Skipped } from './rescore.ts'
 import {
   byWord, comparePhones, compareWords, flatten, focusScore, targetWords,
   type Change, type WordReport,
@@ -52,7 +52,7 @@ export interface PracticeProps {
   drill?: string | null
   onDrillStarted?: () => void
   onAttempt: (attempt: Attempt, replaceAt?: number) => void
-  onReplaceAttempts: (attempts: Attempt[]) => void
+  onAssessment: (before: Attempt, updated: Attempt) => boolean
   onClearHistory: () => void
   onDeleteAttempt: (index: number) => void
   onSpeak: (text: string, onEnd?: () => void, onError?: (message: string) => void) => void
@@ -72,7 +72,7 @@ export interface Playback {
 
 export function usePracticeState({
   text, dict, display, attempts, drill, onDrillStarted,
-  onAttempt, onReplaceAttempts, onClearHistory, onDeleteAttempt, onSpeak,
+  onAttempt, onAssessment, onClearHistory, onDeleteAttempt, onSpeak,
 }: PracticeProps) {
   const [mode, setMode] = useState<Mode>('free')
   const [target, setTarget] = useState('')
@@ -114,6 +114,10 @@ export function usePracticeState({
   const [browsing, setBrowsing] = useState(false)
   const [backend, setBackend] = useState<BackendInfo | null>(null)
   const [backfill, setBackfill] = useState<{ done: number; total: number } | null>(null)
+  const [rescoreSummary, setRescoreSummary] = useState<{ rescored: number; skipped: Skipped[]; error?: string } | null>(null)
+  const refreshRunning = useRef(false)
+  const refreshCancel = useRef<AbortController | null>(null)
+  const migrated = useRef(false)
 
   const recorder = useRef(new Recorder())
   const drillPanel = useRef<HTMLDivElement | null>(null)
@@ -397,28 +401,54 @@ export function usePracticeState({
     [heard, wordsFor, onAttempt, editing, attempts, backend, playback],
   )
 
-  const migrated = useRef(false)
-  useEffect(() => {
-    if (!backend || migrated.current || !dict) return
-    const total = pendingRescore(attempts)
-    if (total === 0) return
-
+  const refreshHistory = useCallback(async (force = true) => {
+    if (refreshRunning.current || !dict || phase === 'recording' || phase === 'analysing') return
+    const total = force ? attempts.length : pendingRescore(attempts)
+    if (!total) return
+    refreshRunning.current = true
     migrated.current = true
-    const currentDict = dict
-    void (async () => {
-      setBackfill({ done: 0, total })
-      try {
-        const result = await rescoreAll(attempts, currentDict, (done, count) =>
-          setBackfill({ done, total: count }),
-        )
-        onReplaceAttempts(result.attempts)
-      } catch {
-        // service error
-      } finally {
-        setBackfill(null)
-      }
-    })()
-  }, [backend, attempts, dict, onReplaceAttempts])
+    const controller = new AbortController()
+    refreshCancel.current = controller
+    setBackfill({ done: 0, total }); setRescoreSummary(null)
+    let committed = 0
+    const failures: Skipped[] = []
+    try {
+      backupAttempts()
+      const service = await reprobe()
+      if (!service) throw new Error('Start the local scoring service, then choose Recalculate all. No recording was changed.')
+      setBackend(service)
+      const result = await rescoreAll(attempts, dict, (done, count) => setBackfill({ done, total: count }), {
+        force, signal: controller.signal, onSkipped: item => failures.push(item),
+        onUpdate: (before, updated) => {
+          const applied = onAssessment(before, updated)
+          if (applied) committed++
+          return applied
+        },
+      })
+      if (!controller.signal.aborted) setRescoreSummary({ rescored: result.rescored, skipped: result.skipped })
+    } catch (err) {
+      if (!controller.signal.aborted) setRescoreSummary({ rescored: committed, skipped: failures, error: (err as Error).message })
+    } finally {
+      refreshRunning.current = false
+      if (!controller.signal.aborted) setBackfill(null)
+    }
+  }, [attempts, dict, phase, onAssessment])
+
+  useEffect(() => {
+    if (backend && !migrated.current && dict && phase !== 'recording' && phase !== 'analysing' && pendingRescore(attempts)) void refreshHistory(false)
+  }, [backend, attempts, dict, phase, refreshHistory])
+  useEffect(() => () => { refreshCancel.current?.abort() }, [])
+
+  // An open diagnostic must follow its recording's newest analysis too.
+  const shownAttempt = useRef<Attempt | undefined>(undefined)
+  useEffect(() => {
+    const updated = editing === null ? undefined : attempts[editing]
+    if (updated && updated !== shownAttempt.current && phase === 'done' && target === updated.target) {
+      setAligned(updated.aligned)
+      setHeard(updated.aligned.filter(s => s.actual !== null).map(s => ({ phone: s.actual!, start: s.start ?? 0, end: s.end ?? 0 })))
+    }
+    shownAttempt.current = updated
+  }, [attempts, editing, phase, target])
 
   const editTarget = (value: string) => {
     setTarget(value)
@@ -431,6 +461,7 @@ export function usePracticeState({
   }
 
   const beginRecording = useCallback(async (practiceContext?: { session: string; first?: boolean }) => {
+    if (refreshRunning.current) { setError('History is being recalculated. Wait for it to finish before recording.'); return }
     silence()
     recordingPractice.current = practiceContext ?? { session: studioSession.current }
     setError(null)
@@ -512,6 +543,7 @@ export function usePracticeState({
           durationMs: taken.durationMs,
           mode,
           ...practiceMeta,
+          assessment: { version: ASSESSMENT_VERSION, at, source: 'recording' },
         })
         return
       }
@@ -581,7 +613,7 @@ export function usePracticeState({
 
   const handleClearHistory = useCallback(() => {
     const many = attempts.length
-    if (!window.confirm(`Delete all ${many} saved attempt${many === 1 ? '' : 's'}? This cannot be undone.`)) return
+    if (!window.confirm(`Delete all ${many} saved attempt${many === 1 ? '' : 's'}, original assessments, history backup and recordings? This cannot be undone.`)) return
     setEditing(null)
     setClips(new Set())
     onClearHistory()
@@ -634,8 +666,9 @@ export function usePracticeState({
 
   useEffect(() => {
     let live = true
-    void pruneClips(attempts.map((attempt) => attempt.at))
-      .then(listClips)
+    // No automatic deletion: concurrent saves and incomplete storage reads must
+    // never make audio look orphaned. Only explicit delete/reset removes clips.
+    void listClips()
       .then((known) => { if (live) setClips(known) })
     return () => { live = false }
   }, [attempts])
@@ -836,10 +869,11 @@ export function usePracticeState({
     onDrillStarted?.()
   }, [drill, startDrill, onDrillStarted])
 
-  const score = aligned ? scoreAlignment(aligned) : null
-  const line = lineProgress(attempts, target)
+  const score = aligned ? currentAttempt?.aligned === aligned && currentAttempt.target === target ? currentAttempt.score : scoreAlignment(aligned) : null
+  const compatibleAttempts = analysisAttempts(attempts)
+  const line = lineProgress(compatibleAttempts, target)
   const weak = review.weak.slice(0, 4)
-  const average = recentAverage(attempts)
+  const average = recentAverage(compatibleAttempts)
 
   const step = session?.steps[stepAt] ?? null
   const onStep = !!step && sameLine(step.phrase.text, target)
@@ -854,7 +888,7 @@ export function usePracticeState({
     setPicked(
       wanted.includes(phone) ? wanted.filter((p) => p !== phone) : [...wanted, phone],
     )
-  const busy = phase === 'analysing'
+  const busy = phase === 'analysing' || backfill !== null
   const fetching = load.stage === 'library' || load.stage === 'weights'
 
   useEffect(() => {
@@ -884,7 +918,8 @@ export function usePracticeState({
     troubleSearch, setTroubleSearch,
     newWordInput, setNewWordInput, newWordError, setNewWordError,
     picked, browsing, setBrowsing,
-    backend, backfill,
+    backend, backfill, rescoreSummary, refreshHistory,
+    refreshedCount: attempts.filter(isRefreshed).length, compatibleAttempts,
     drillPanel,
     sentences, words, expectedIPA, report, open, produced,
     earlier, wordChange, phoneChange, history, score,
@@ -899,7 +934,7 @@ export function usePracticeState({
     handleAddWord, removeWord, togglePin, clearTroubles, toggleSound,
     display,
     attempts,
-    practiceThreshold, setPracticeThreshold, reviewChoices, resolveWordReview, reviewPatterns: review,
+    practiceThreshold, practicePreferences, setPracticeThreshold, reviewChoices, resolveWordReview, reviewPatterns: review,
   }
 }
 

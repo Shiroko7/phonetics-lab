@@ -114,7 +114,24 @@ export function wavInfo(bytes) {
   assert(format && dataBytes > 0 && dataBytes % format.blockAlign === 0, 'Missing or incomplete WAV samples')
   return { sampleRate: format.sampleRate, channels: format.channels, duration: dataBytes / format.byteRate }
 }
-export async function importLocalBoundaries({ root, output, revision, acknowledgeTerms = false, limit = 100, split = 'validation' }) {
+/** Rank filenames with speaker identity so shared prompts do not dominate every speaker's pilot. */
+export function selectBoundaryCandidates(candidates, limit, selection = 'v2') {
+  assert(['v1', 'v2'].includes(selection), 'Unknown boundary selection version')
+  assert(Number.isInteger(limit) && limit > 0, 'Limit must be positive')
+  const groups = new Map()
+  for (const row of candidates) { if (!groups.has(row.speaker)) groups.set(row.speaker, []); groups.get(row.speaker).push(row) }
+  const rank = s => sha256(`l2-boundary-pilot-${selection}:${s}`), compare = (a, b) => rank(a).localeCompare(rank(b), 'en')
+  for (const group of groups.values()) group.sort((a, b) => compare(selection === 'v1' ? a.name : `${a.speaker}/${a.name}`, selection === 'v1' ? b.name : `${b.speaker}/${b.name}`))
+  const selected = [], speakers = [...groups.keys()].sort(compare)
+  for (let round = 0; selected.length < Math.min(limit, candidates.length); round++) {
+    for (const speaker of speakers) {
+      if (groups.get(speaker)[round]) selected.push(groups.get(speaker)[round])
+      if (selected.length === Math.min(limit, candidates.length)) break
+    }
+  }
+  return selected
+}
+export async function importLocalBoundaries({ root, output, revision, acknowledgeTerms = false, limit = 100, split = 'validation', selection = 'v2' }) {
   assert(acknowledgeTerms, 'Obtain the corpus from its provider and review its CC BY-NC terms yourself; pass --acknowledge-terms only after doing so')
   assert(root && output && revision, 'Corpus root, output directory and release identifier are required')
   assert(Number.isInteger(limit) && limit > 0, 'Limit must be positive')
@@ -138,18 +155,8 @@ export async function importLocalBoundaries({ root, output, revision, acknowledg
     for (const name of files.filter(n => /\.TextGrid$/i.test(n))) candidates.push({ speaker: entry.name, name })
   }
   assert(candidates.length, 'No manual annotation/ TextGrids found. Automatic textgrid/ labels are not human gold.')
-  // Round-robin speakers, then hash-ranked utterances. No ranking by scores or annotation contents.
-  const groups = new Map()
-  for (const row of candidates) { if (!groups.has(row.speaker)) groups.set(row.speaker, []); groups.get(row.speaker).push(row) }
-  const rank = s => sha256(`l2-boundary-pilot-v1:${s}`), compare = (a, b) => rank(a).localeCompare(rank(b), 'en')
-  for (const group of groups.values()) group.sort((a, b) => compare(a.name, b.name))
-  const selected = [], speakers = [...groups.keys()].sort(compare)
-  for (let round = 0; selected.length < Math.min(limit, candidates.length); round++) {
-    for (const speaker of speakers) {
-      if (groups.get(speaker)[round]) selected.push(groups.get(speaker)[round])
-      if (selected.length === Math.min(limit, candidates.length)) break
-    }
-  }
+  // No ranking by scores or annotation contents; preserve selected failures as exclusions.
+  const selected = selectBoundaryCandidates(candidates, limit, selection)
   const rows = [], excluded = []
   for (const candidate of selected) {
     const { speaker, name } = candidate, stem = basename(name).replace(/\.TextGrid$/i, '')
@@ -178,7 +185,9 @@ export async function importLocalBoundaries({ root, output, revision, acknowledg
     importer: 'manual-textgrid-long-v1', importerSha256: sha256(await readFile(new URL(import.meta.url))),
     license: 'CC-BY-NC-4.0', licenseSha256: sha256(license), termsAcknowledgedLocally: true,
     sourceUrl: 'https://psi.engr.tamu.edu/l2-arctic-corpus/',
-    selection: 'l2-boundary-pilot-v1; speaker round-robin; no replacement for failed imports',
+    selection: `l2-boundary-pilot-${selection}; speaker round-robin; ${selection === 'v2' ? 'speaker-qualified filename hashes' : 'shared filename hashes'}; no replacement for failed imports`,
+    distinctSelectedPrompts: new Set(selected.map(r => r.name)).size,
+    distinctImportedTexts: new Set(rows.map(r => r.text)).size,
     requestedLimit: limit, availableManualFiles: candidates.length,
     selected: selected.length, imported: rows.length, excluded, speakersWithoutManualDirectory: absent,
     speakers: [...new Set(rows.map(r => r.speaker))].sort(), goldSha256: sha256(bytes),
@@ -197,8 +206,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     for (let i = 0; i < args.length; i++) {
       if (args[i] === '--acknowledge-terms') options.acknowledgeTerms = true
       else {
-        assert(['--root', '--output', '--revision', '--limit', '--split'].includes(args[i]) && args[i + 1],
-          'Usage: npm run benchmark:boundaries:import -- --root CORPUS --output datasets/NEW_IMPORT --revision v5.0 --acknowledge-terms [--limit 100] [--split validation]')
+        assert(['--root', '--output', '--revision', '--limit', '--split', '--selection'].includes(args[i]) && args[i + 1],
+          'Usage: npm run benchmark:boundaries:import -- --root CORPUS --output datasets/NEW_IMPORT --revision v5.0 --acknowledge-terms [--limit 100] [--split validation] [--selection v2]')
         options[args[i].slice(2)] = args[i] === '--limit' ? Number(args[++i]) : args[++i]
       }
     }

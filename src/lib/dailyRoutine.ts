@@ -4,7 +4,7 @@ import {
 } from '../data/dailyContent.ts'
 import { expectedPhones } from './align.ts'
 import { contextSentences, isPracticeContext, isWordCarrier } from './context.ts'
-import { localDateKey, scheduleDailyCard, type DailyCard, type DailySession, type DailyState, type ReviewRating } from './daily.ts'
+import { localDateKey, scheduleDailyCard, type CurrentDailyAssessment, type DailyCard, type DailySession, type DailyState, type ReviewRating } from './daily.ts'
 import type { Dictionary } from './dict.ts'
 import { flatten, targetWords } from './report.ts'
 import type { Voice } from './speech.ts'
@@ -56,6 +56,8 @@ export interface RoutineEvent {
   voiceURI?: string
   referenceHeard?: boolean
   fresh?: boolean
+  /** Derived view only; original event fields above remain immutable. */
+  currentAssessment?: CurrentDailyAssessment
 }
 export interface DailyRoutine {
   version: 1
@@ -380,7 +382,10 @@ function scheduleRoutineTarget(state: DailyState, sessionId: string, cardId: str
   const card = state.cards.find((item) => item.id === cardId)
   if (!session?.routine || !card) return state
   const events = session.routine.events.filter((event) => event.cardId === card.id)
-  const rating = routineCardRating(events, session.routine.practiceReviews, session.routine.practiceReviewResolved)
+    .map(event => event.currentAssessment ? { ...event, ...event.currentAssessment } : event)
+  const choices = Object.fromEntries(Object.entries(session.routine.practiceReviews ?? {})
+    .filter(([at]) => !events.some(e => String(e.attemptAt) === at && e.currentAssessment)))
+  const rating = routineCardRating(events, choices, session.routine.practiceReviewResolved)
   const alreadyReviewed = state.reviews.some((review) => review.cardId === card.id && localDateKey(review.reviewedAt) === localDateKey(now))
   if (!rating || alreadyReviewed) return state
   const scheduled = scheduleDailyCard(card, rating, now)

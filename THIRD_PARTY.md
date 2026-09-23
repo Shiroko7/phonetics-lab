@@ -99,6 +99,16 @@ Git tree. See [the benchmark guide](docs/human-benchmarks.md) and
   stay in ignored `datasets/`, outside `public/` and builds. Keeping this data local
   does not make it Apache-licensed or commercially cleared. See the
   [import instructions and limits](docs/evaluation-foundation.md#manually-corrected-boundary-adapter).
+  The registered user supplied v5.0 access on 2026-09-23. The archive, original
+  notices, manual subset, local integrity hashes and derived pilot results are now
+  stored under ignored `datasets/`; see [baseline provenance](docs/word-boundary-baseline.md).
+  Two local forced-aligner candidates were also screened on this same development
+  subset. Qwen3-ForcedAligner-0.6B's model card identifies Apache-2.0; its exact
+  checkpoint revision and local-only outputs are recorded under ignored `datasets/`.
+  This does not clear L2-ARCTIC audio for redistribution. Montreal Forced Aligner's
+  conda package identifies MIT, but the separately downloaded `english_us_arpa`
+  acoustic model and dictionary are also local-only here; review their training-data
+  and model terms independently before distributing them. Neither model is bundled.
 - [Buckeye](https://buckeyecorpus.osu.edu/): free for noncommercial use with provider
   registration. Keep outside the app and repository.
 - [Santa Barbara](https://linguistics.ucsb.edu/research/santa-barbara-corpus-spoken-american-english):

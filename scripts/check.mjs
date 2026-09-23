@@ -525,8 +525,8 @@ group('scorers are kept apart', () => {
   check('nor is one from an older revision', isCurrent(made(1, 'gop', SCORER_REVISION - 1)), false)
   check('nor one scored before revisions existed', isCurrent(made(1, 'gop')), false)
 
-  check('everything not current is pending', pendingRescore([current(1), made(2, 'browser'), legacy]), 2)
-  check('a fully migrated history has none', pendingRescore([current(1), current(2)]), 0)
+  check('the one-time refresh includes unmarked current recordings', pendingRescore([current(1), made(2, 'browser'), legacy]), 3)
+  check('a fully migrated history has none', pendingRescore([current(1), current(2)].map(a => ({ ...a, assessment: { version: 1, at: 10, source: 'history-rescore' } }))), 0)
   check('a stale revision brings them back', pendingRescore([made(1, 'gop', SCORER_REVISION - 1)]), 1)
 })
 

@@ -14,6 +14,7 @@ import { band as scoreBand } from '../lib/usePracticeState.ts'
 import { SoundReviewPatterns } from './shared/SoundReviewPatterns.tsx'
 import type { Dictionary } from '../lib/dict.ts'
 import { loadDailyState } from '../lib/daily.ts'
+import { currentDailyView, reassessDaily } from '../lib/dailyReassessment.ts'
 import { getClip } from '../lib/clips.ts'
 import { loadCommonWords } from '../lib/drills.ts'
 
@@ -46,7 +47,8 @@ export function StatsSummary({
 
   const { attempts, struggles, clips, reopen, practiseWord, setLine } = practice
   const band = (score: number) => scoreBand(score, practice.practiceThreshold)
-  const dailyState = useMemo(() => loadDailyState(), [])
+  const dailyState = useMemo(() => currentDailyView(reassessDaily(loadDailyState(), attempts, dict, practice.practicePreferences, practice.reviewPatterns)),
+    [attempts, dict, practice.practicePreferences, practice.reviewPatterns])
 
   useEffect(() => {
     let mounted = true
@@ -220,7 +222,7 @@ export function StatsSummary({
   return (
     <div className="stats-container">
       <SoundReviewPatterns practice={practice} />
-      <p className="daily-help">The first-take panel above uses your current sound-review policy. Historical analytics below retain original model verdicts and include retries; their accuracy and mastery labels are model summaries, not human-validated correctness or practice pass rates.</p>
+      <p className="daily-help">These charts use the latest assessments for {practice.compatibleAttempts.length}/{attempts.length} retained recordings on {practice.reviewPatterns.scale}, including legacy takes and retries. Other scoring scales are excluded, not deleted. Recalculation changes the analysis of old audio, not your recording dates or evidence of improvement. Accuracy and mastery labels are model summaries, not human-validated correctness.</p>
       {/* HEADER BAR & CONTROLS */}
       <header className="stats-header">
         <div className="stats-header-titles">

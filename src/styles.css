@@ -6000,3 +6000,16 @@ button.recording {
 .phone-slot.unscored, .word-chip.uncertain { background: var(--bg-sunken); border-color: var(--line); color: var(--ink-soft); }
 .phone-slot { min-width: 65px; min-height: 90px; height: auto; padding: 6px 4px; }
 .word-chip small { font-size: 10px; }
+
+.history-recalculation {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 12px;
+  margin: 10px 20px; padding: 12px 16px; border: 1px solid var(--line);
+  border-radius: 10px; color: var(--ink-soft); font-size: 12px;
+}
+.history-recalculation > div { flex: 1 1 260px; display: grid; gap: 4px; }
+.history-recalculation strong { color: var(--ink); }
+.history-recalculation details { flex-basis: 100%; overflow-wrap: anywhere; }
+.history-recalculation progress { width: 100%; max-width: 420px; accent-color: var(--accent); }
+.history-original-assessment { font-size: 10px; max-width: 180px; color: var(--ink-soft); }
+.history-original-assessment summary { cursor: pointer; }
+.take-open-btn > small { font-size: 10px; color: var(--ink-soft); }

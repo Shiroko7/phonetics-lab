@@ -14,10 +14,10 @@ import {
   analyze as analyzeRemote, probe as probeBackend, transcribe as transcribeRemote,
   type BackendInfo,
 } from '../lib/backend.ts'
-import { getClip, listClips, putClip, pruneClips } from '../lib/clips.ts'
+import { getClip, listClips, putClip } from '../lib/clips.ts'
 import { stop as stopSpeaking } from '../lib/speech.ts'
 import {
-  aggregate, lineProgress, mixedScorers, recentAverage, sameLine, SCORER_REVISION,
+  aggregate, backupAttempts, lineProgress, mixedScorers, recentAverage, sameLine, SCORER_REVISION,
   toSentences,
   type Attempt,
 } from '../lib/practice.ts'
@@ -49,8 +49,8 @@ interface Props {
   drill?: string | null
   onDrillStarted?: () => void
   onAttempt: (attempt: Attempt, replaceAt?: number) => void
-  /** Bulk rewrite, for re-scoring the history in one pass. */
-  onReplaceAttempts: (attempts: Attempt[]) => void
+  /** The parent must compare-and-swap one recording against current history. */
+  onAssessment: (before: Attempt, updated: Attempt) => boolean
   onClearHistory: () => void
   onDeleteAttempt: (index: number) => void
   onSpeak: (text: string, onEnd?: () => void) => void
@@ -81,7 +81,7 @@ interface Playback {
 
 export function Practice({
   text, dict, display, attempts, drill, onDrillStarted,
-  onAttempt, onReplaceAttempts, onClearHistory, onDeleteAttempt, onSpeak,
+  onAttempt, onAssessment, onClearHistory, onDeleteAttempt, onSpeak,
 }: Props) {
   const [mode, setMode] = useState<Mode>('free')
   const [target, setTarget] = useState('')
@@ -472,18 +472,18 @@ export function Practice({
     void (async () => {
       setBackfill({ done: 0, total })
       try {
-        const result = await rescoreAll(attempts, dict, (done, count) =>
+        backupAttempts()
+        await rescoreAll(attempts, dict, (done, count) =>
           setBackfill({ done, total: count }),
+          { onUpdate: onAssessment },
         )
-        onReplaceAttempts(result.attempts)
-      } catch {
-        // The service going away mid-pass is not worth interrupting practice
-        // over. What did not convert is still tagged as the browser's.
+      } catch (err) {
+        setError((err as Error).message)
       } finally {
         setBackfill(null)
       }
     })()
-  }, [backend, attempts, dict, onReplaceAttempts])
+  }, [backend, attempts, dict, onAssessment])
 
   const editTarget = (value: string) => {
     setTarget(value)
@@ -709,11 +709,10 @@ export function Practice({
     [attempts, silence],
   )
 
-  // Tidy away clips whose attempt is gone, then note what is left to play.
+  // Only explicit deletion/reset removes recordings; never prune on a stale list.
   useEffect(() => {
     let live = true
-    void pruneClips(attempts.map((attempt) => attempt.at))
-      .then(listClips)
+    void listClips()
       .then((known) => { if (live) setClips(known) })
     return () => { live = false }
   }, [attempts])

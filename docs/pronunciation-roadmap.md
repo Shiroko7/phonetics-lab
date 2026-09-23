@@ -1,6 +1,6 @@
 # Pronunciation accuracy roadmap
 
-Research reviewed 2026-09-21; implementation updated 2026-09-22.
+Research reviewed 2026-09-21; implementation updated 2026-09-23.
 Goal: trustworthy feedback on American English pronunciation,
 with word replay that does not deliberately include neighboring speech.
 
@@ -50,11 +50,25 @@ Revision 2 is a reliability baseline, not a validated accuracy improvement on hu
 - Frozen speaker-disjoint training/calibration/validation partitions, an exposed
   regression set and a guarded final reservation. New 100-recording calibration and
   validation baselines separate incorrect/missed labels, accent-sensitive labels and
-  fully-correct flags. No calibration has been fitted or final holdout scored.
+  fully-correct flags. Numerical scores remain uncalibrated; the final holdout is unscored.
 - A local-only L2-ARCTIC manual-boundary importer and an evaluator that separates
   acoustic estimates from playback, measures target clipping as well as neighbor
-  leakage, and retains human timing uncertainty. The adapter is tested; real manual
-  corpus evaluation is still pending. See [evaluation foundation](evaluation-foundation.md).
+  leakage, and retains human timing uncertainty. The first real v5.0 pilot covers
+  100 recordings / 24 speakers / 975 words: mean boundary error 59.6 ms, mean target
+  clipping 115.2 ms. See the [boundary baseline](word-boundary-baseline.md).
+- Full saved-history recalculation, with visible progress/failures, a pre-refresh
+  backup, preserved original assessments and per-recording conflict-safe merges.
+  Latest analyses propagate into diagnostics, word histories, compatible-scale Stats
+  and Daily assessment views/targets. Legacy takes can suggest practice without being
+  relabeled as independent first takes; completed Daily events/schedules remain saved.
+  See [history recalculation](history-recalculation.md). This improves consistency,
+  not acoustic accuracy; successful refresh still requires each recording's audio.
+- Automated offline false-flag diagnosis and calibration-only cutoff selection,
+  followed by a separate validation comparison with paired speaker-bootstrap intervals.
+  The first candidate reduced false flags but lost too much error recall, so it was
+  rejected and the default remains 80. The boundary inference runner and normalized
+  candidate comparison are ready; the human boundary baseline is now measured.
+  See [automated validation and measured results](automated-validation.md).
 
 Regression checks: `npm run check`, `make check-api`, and
 `node scripts/check-daily-browser.mjs` with the web server running. They use synthetic
@@ -91,8 +105,8 @@ original microphone signal. This limitation affects both backend and browser sco
 | Phase | Work | Evidence required to finish |
 | --- | --- | --- |
 | 0 — Reliability baseline | Changes listed above | Deterministic regressions, build and browser flow pass; limitations remain visible |
-| 1 — Human evaluation set (in progress) | Speaker-disjoint protocol and assessment baselines implemented; manual-boundary adapter ready; representative recordings pending | Human timing measurements, consent/provenance, adjudicated representative labels and final held-out comparison still required |
-| 2 — Better word alignment | Compare current revision with MFA 3 US English and Qwen3-ForcedAligner; add alignment provenance/confidence to the API | Lower boundary error and neighboring-word leakage without hiding difficult cases or increasing clipped target sounds |
+| 1 — Human evaluation set (in progress) | Speaker-disjoint assessment baselines, automated cutoff experiment, 100-recording boundary baseline and first local aligner screen completed | Broader population evidence and final held-out comparison still required |
+| 2 — Better word alignment | Resolve boundary ownership/replay tradeoffs, run MFA 3 on a supported platform, then add candidate provenance/confidence only when validated | Lower boundary error and neighboring-word leakage without hiding difficult cases or increasing clipped target sounds |
 | 3 — Pronunciation validity | Optional/deleted/inserted phones, contextual pronunciation paths, trained assessment and per-phone calibration | Better false-rejection/acceptance tradeoff on held-out human labels; explicit abstention and coverage; no regression on valid US variants |
 | 4 — Natural American speech | Stress, rhythm, intonation, sentence-matched reference excerpts and multiple US speakers | Separate human-rated prosody evaluation; repeatable coaching; no penalty for unrelated voice/pitch differences |
 | 5 — Deployment and monitoring | Provider/version provenance, calibration migration, latency/cost/privacy measurements, robust raw PCM capture | Same evidence across supported devices; revision-separated analytics; reproducible rollback and benchmark reports |
@@ -107,8 +121,9 @@ average scores. Raising every score can reduce false rejections while accepting 
 implemented public-corpus importer, five-rater label preservation, reproducible local
 runner and the first real-data baseline: 100 speakers / 632 words, with Pearson
 correlations of 0.455 for sentence accuracy and 0.336 for word accuracy. These are
-not accuracy percentages. Prosody/fluency/stress predictions and human word-boundary
-validation are still absent. No scoring thresholds were tuned on this pilot.
+not accuracy percentages. Prosody/fluency/stress predictions are still absent.
+Human word-boundary measurements now come from the separate L2-ARCTIC pilot.
+No scoring thresholds were tuned on this original assessment pilot.
 Phone-level evaluation is now partial rather than absent; the new practice workflow
 is implemented, but phase 1's evidence gates and phase 3's validity gate remain open.
 
@@ -116,16 +131,19 @@ The [evaluation foundation](evaluation-foundation.md) now provides development/
 calibration/validation splits and a locked final reservation. Additional 100-recording
 calibration and validation runs cover separate 25-speaker groups; validation word
 Pearson correlation is 0.337, with substantial below-80 flags on human-correct sounds.
-This is a measured baseline, not improved scoring. The manual-boundary importer and
-uncertainty/clipping metrics are implemented but have not measured full-corpus human
-timing accuracy. Remaining phase-1 work includes those measurements, representative
-personal/native-US recordings, independent adjudication, candidate comparisons,
-confidence intervals and a frozen final comparison. The human-benchmark guide also
+This is a measured baseline, not improved scoring. The L2-ARCTIC v2 selection now
+provides real timing/clipping measurements and speaker-bootstrap intervals, with
+100 recordings spanning 81 prompt IDs. It is development evidence, not full-corpus
+or final-test accuracy. Remaining phase-1 work includes representative personal/native-US
+evidence, independent adjudication and frozen candidate/final comparisons. The human-benchmark guide also
 documents the parallel spoken-frequency, sentence-coverage and nonrepetition track.
 
-Start with 100–200 short recordings as a pilot, including the user's problem cases and
-native American English controls. This is a starting regression corpus, not enough to
-establish universal state-of-the-art performance.
+Use existing expert-labeled public corpora for automated development evaluation first.
+Learners do not grade recordings or mark boundaries. Gated corpus registration is a
+one-time access task, separate from annotation. A later targeted study can collect
+100–200 consented recordings, including personal problem cases and native American
+English controls, with qualified independent reviewers. That study supports claims
+about those populations; it does not block public-data improvements or app use.
 
 Include natural speeds and reductions, short articles, vowel-to-vowel boundaries,
 same-consonant boundaries (“black cat”), rhotic boundaries (“saw red”), pauses,
@@ -193,14 +211,26 @@ baseline and rater disagreement; do not invent a validated target from synthetic
 
 ## Phase 2: alignment candidates
 
-- **MFA 3 US English**: first local baseline for word and phone alignment. Its authors'
+- **Initial screen complete; integration remains open.** Both candidates were run
+  locally on the frozen 100-recording / 24-speaker L2-ARCTIC set. They reduced target
+  clipping but raised neighboring-speech leakage from 1.9 ms/replay to 17.4–22.8 ms.
+  Qwen left 73 of 975 words without a positive-width interval. Neither candidate is
+  selected. See [paired results and limitations](word-boundary-baseline.md#local-aligner-candidates).
+- **MFA 3 US English** remains the intended comparison, but Windows conda-forge
+  supplied MFA 2.2.4 only. The measured MFA result is labeled 2.2.4, not 3; the
+  3.x run requires a supported platform. Its authors'
   [2026 evaluation](https://arxiv.org/html/2606.18466v1) compares multiple aligners on
   TIMIT/Buckeye and other languages. Those results are not a benchmark of this user's
   recordings. Deployment uses an additional [Conda/container environment](https://montreal-forced-aligner.readthedocs.io/en/latest/installation.html).
 - **[Qwen3-ForcedAligner-0.6B](https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B)**:
-  local neural word-timestamp candidate with a Python interface. Run in an isolated
-  environment first; assess latency/memory on the supported hardware. It does not
-  provide a validated pronunciation grade merely by aligning text.
+  local neural word-timestamp candidate. Its frozen pilot run is recorded with exact
+  checkpoint revision, GPU, timing coverage and latency. It does not provide a
+  validated pronunciation grade merely by aligning text.
+
+Next, inspect the worst cases and test how phone/word ownership, uncertainty and
+playback trims affect both neighbors and target coverage. Keep acoustic boundaries
+separate from playable intervals; do not choose wider spans solely for lower mean
+error. Only then propose API provenance/confidence changes and test an MFA 3 run.
 
 The response should distinguish word acoustic spans, playback spans, token spans,
 ownership and alignment reliability. Preserve word boundaries without forcing a shared

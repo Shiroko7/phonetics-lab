@@ -34,8 +34,8 @@ export function validateResponse(body, expected) {
 }
 
 /** Hash working-tree bytes, not just HEAD: uncommitted scoring changes must be distinguishable. */
-async function sourceFingerprint() {
-  const paths = ['scripts/benchmark-assessment.mjs', 'scripts/benchmark-splits.mjs', 'scripts/evaluate-assessment.mjs', 'scripts/prepare-speechocean.mjs', 'scripts/speechocean.json', 'backend/uv.lock', 'package-lock.json']
+export async function sourceFingerprint() {
+  const paths = ['scripts/benchmark-assessment.mjs', 'scripts/benchmark-boundaries.mjs', 'scripts/evaluate-boundaries.mjs', 'scripts/import-l2-arctic.mjs', 'scripts/validation-statistics.mjs', 'scripts/benchmark-splits.mjs', 'scripts/evaluate-assessment.mjs', 'scripts/prepare-speechocean.mjs', 'scripts/speechocean.json', 'backend/uv.lock', 'package-lock.json']
   for (const [dir, extension] of [['src/lib', '.ts'], ['backend/app', '.py']]) {
     for (const name of await readdir(resolve(ROOT, dir))) if (name.endsWith(extension)) paths.push(`${dir}/${name}`)
   }

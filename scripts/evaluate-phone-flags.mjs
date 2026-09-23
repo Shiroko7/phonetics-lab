@@ -51,7 +51,7 @@ function summarizeRubrics(pairs, threshold) {
   }
 }
 
-export function evaluatePhoneFlags(gold, raw, threshold = 80, { split = 'test' } = {}) {
+export function evaluatePhoneFlags(gold, raw, threshold = 80, { split = 'test', includePairs = false } = {}) {
   assert(['test', 'training', 'calibration', 'validation', 'regression'].includes(split), 'Unknown evaluation partition; final is locked')
   assert(Number.isInteger(threshold) && threshold >= 0 && threshold <= 100, 'Threshold must be an integer 0–100')
   assert(Array.isArray(gold) && gold.length && Array.isArray(raw), 'Nonempty gold and response arrays required')
@@ -114,6 +114,11 @@ export function evaluatePhoneFlags(gold, raw, threshold = 80, { split = 'test' }
         const labels = annotations.map(a => a.labels[pi])
         const counts = [0, 1, 2].map(value => labels.filter(n => n === value).length)
         pairs.push({ id: row.id, speaker: row.speaker, word: wi, slot: pi, phone: expected[pi], score: value,
+          wordText: word.text, previous: expected[pi - 1] ?? '#', next: expected[pi + 1] ?? '#',
+          position: pi === 0 ? 'initial' : pi === expected.length - 1 ? 'final' : 'medial',
+          stress: /[012]$/.exec(word.phones[pi])?.[0] ?? null,
+          durationMs: (phone.end - phone.start) * 1000, gop: phone.gop, posterior: phone.posterior,
+          heard: phone.heard ?? null, labels,
           human: word.phoneAccuracy[pi], concern: counts[0] >= 3, nonPerfectMajority: counts[0] + counts[1] >= 3,
           category: counts[0] >= 3 ? 'incorrectOrMissed' : counts[1] >= 3 ? 'heavyAccent' : counts[2] >= 3 ? 'correct' : 'noCategoryMajority',
           unanimous: labels.every(n => n === labels[0]) })
@@ -127,6 +132,7 @@ export function evaluatePhoneFlags(gold, raw, threshold = 80, { split = 'test' }
     recordings: gold.length, speakers: new Set(gold.map(r => r.speaker)).size,
     eligible, scored: pairs.length, coverage: ratio(pairs.length, eligible), excluded,
     insertionAnnotationsNotEvaluated: insertedAnnotations, metrics: summarize(pairs, threshold),
+    ...(includePairs ? { pairs } : {}),
     rubrics: summarizeRubrics(pairs, threshold),
     rubricDefinitions: { majorityIncorrectOrMissed: 'At least 3/5 raters mark 0.', majorityAccentOrError: 'At least 3/5 raters mark either 0 or 1; an accent/quality target, not solely error detection.',
       humanCategories: 'Separate exact-category majority (0, 1 or 2); otherwise no category majority. Never force a tie into correct.' },

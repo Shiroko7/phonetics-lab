@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Dictionary } from '../lib/dict.ts'
-import { dominant } from '../lib/report.ts'
+import { currentDailyView, dailyCandidates, reassessDaily } from '../lib/dailyReassessment.ts'
 import { PRACTICE_POLICY_REVISION, soundScore, wordPracticeStatus } from '../lib/practicePolicy.ts'
 import { automaticDailyOutcome } from '../lib/dailyDecision.ts'
 import {
-  cardIdForSound, cardIdForWord, findOpenSession, formatDue, loadDailyState,
+  findOpenSession, formatDue, loadDailyState,
   localDateKey, saveDailyState, startDailySession, syncCandidates,
-  type CardCandidate, type DailyCard, type DailyState,
+  type DailyCard, type DailyState,
 } from '../lib/daily.ts'
 import {
   advanceRoutine, changeRoutineVoice, exposeRoutineStep, markReferenceHeard, planDailyRoutine, refreshLegacyContexts, refreshRoutineVoices,
@@ -29,18 +29,6 @@ const STAGES: Record<RoutineKind, { title: string; instruction: string }> = {
   listening: { title: 'Hear the difference', instruction: 'Listen to the whole sentence, then choose the sentence you heard. Your first answer is saved.' },
   production: { title: 'Practise in context', instruction: 'Listen, then say the whole sentence at a comfortable pace. Use the word highlights to guide another try.' },
   transfer: { title: 'Try an unfamiliar sentence', instruction: 'Read this new sentence aloud before hearing a reference. Only the first take counts toward your unfamiliar-sentence score.' },
-}
-
-function buildCandidates(practice: PracticeState): CardCandidate[] {
-  const sounds: CardCandidate[] = practice.weak.slice(0, 4).map((stat) => {
-    const swap = dominant(stat.confusions)?.[0]
-    return { id: cardIdForSound(stat.phone, swap), kind: 'sound',
-      label: swap ? `/${stat.phone}/ → /${swap}/` : `/${stat.phone}/`, focusPhones: [stat.phone], confusion: swap }
-  })
-  return [...sounds, ...practice.struggles.filter((entry) => entry.pinned || entry.struggleCount >= 2).slice(0, 8).map((word) => ({
-    id: cardIdForWord(word.word), kind: 'word' as const, label: word.display,
-    word: word.display, focusPhones: word.weakPhones.map((phone) => phone.phone),
-  }))]
 }
 
 function focusPercent(card: DailyCard, practice: PracticeState): number | undefined {
@@ -84,21 +72,23 @@ export function DailyPractice({ practice, dict }: Props) {
   }, [practice.silence])
   useEffect(() => onVoicesReady(setVoices), [])
   useEffect(() => () => { audioGeneration.current++; stop() }, [])
-  const candidates = buildCandidates(practice)
+  const candidates = dailyCandidates(practice.reviewPatterns)
   const candidateSignature = JSON.stringify(candidates)
   useEffect(() => {
     mutate((state) => {
-      const next = syncCandidates(state, candidates)
-      return next.cards.length !== state.cards.length ? next : state
+      const next = reassessDaily(syncCandidates(state, candidates), practice.attempts, dict, practice.practicePreferences, practice.reviewPatterns)
+      return JSON.stringify(next) !== JSON.stringify(state) ? next : state
     })
-  }, [candidateSignature, mutate])
+  }, [candidateSignature, practice.attempts, dict, practice.practicePreferences, practice.reviewPatterns, mutate])
+  const currentDaily = useMemo(() => currentDailyView(daily), [daily])
   const voicePool = useMemo(() => referenceVoicePool(voices, voicePreferences), [voices, voicePreferences])
   const poolSignature = voicePool.map((voice) => voice.uri).join('|')
   const session = daily.sessions.find((item) => item.id === sessionId && !item.endedAt) ?? null
   const routine = session?.routine
   const step = routine?.steps[routine.cursor]
   const currentCard = daily.cards.find((card) => card.id === step?.cardId)
-  const stepEvents = routine?.events.filter((event) => event.stepId === step?.id && event.status !== 'skipped') ?? []
+  const stepEvents = routine?.events.filter((event) => event.stepId === step?.id && event.status !== 'skipped')
+    .map(event => event.currentAssessment ? { ...event, ...event.currentAssessment } : event) ?? []
   const firstEvent = stepEvents[0]
   const lastEvent = stepEvents[stepEvents.length - 1]
   const independent = step?.kind === 'transfer' || step?.kind === 'recall'
@@ -271,11 +261,11 @@ export function DailyPractice({ practice, dict }: Props) {
     setEditingSentence(false)
     setMessage(`${texts.length === 1 ? 'Sentence blacklisted. It' : 'Sentences blacklisted. They'} will no longer appear in Daily Practice. You can restore ${texts.length === 1 ? 'it' : 'them'} in Blacklisted sentences.`)
   }
-  const summary = routineSummary(daily.sessions, today)
+  const summary = routineSummary(currentDaily.sessions, today)
   const outcome = scoredHere && currentCard ? automaticDailyOutcome(currentCard.focusPhones, practice.aligned, practice.score, practice.report, practice.practiceThreshold, practice.reviewChoices) : null
   const historyDates = [...new Set([today, ...daily.sessions.map((item) => item.dateKey),
     ...daily.sessions.flatMap((item) => item.routine?.events.map((event) => localDateKey(event.at)) ?? [])])].sort().reverse().slice(0, 14)
-  const due = daily.cards.filter((card) => card.state !== 'suspended' && card.dueAt <= Date.now()).length
+  const due = daily.cards.filter((card) => card.state !== 'suspended' && !card.analysisInactive && card.dueAt <= Date.now()).length
 
   return (
     <div className="daily-page">
@@ -389,11 +379,11 @@ export function DailyPractice({ practice, dict }: Props) {
         </section>
         <section className="daily-history-card">
           <div className="daily-section-heading"><div><span className="daily-eyebrow">First attempts and extra practice</span><h2>Daily history</h2></div></div>
-          <p className="daily-help">Listening shows correct first answers. Speech columns show average first-take scores out of 100, with the number of checks in parentheses. New sentences and recall are recorded before reference playback. Different scoring systems are shown as “Mixed”, without averaging them together.</p>
+          <p className="daily-help">Speech columns use recalculated assessments where available; original event scores and earned review dates remain saved. Listening answers and first-take status are unchanged. Unavailable recordings retain their original assessment. Different scoring systems are shown as “Mixed”, without averaging them together.</p>
           <div className="daily-history-table-wrap"><table className="daily-history-table">
             <thead><tr><th>Day</th><th>Listening</th><th>Practised speech</th><th>New sentences</th><th>Recall</th><th>Extra takes</th><th>Voices heard</th></tr></thead>
             <tbody>{historyDates.map((date) => {
-              const day = routineSummary(daily.sessions, date)
+              const day = routineSummary(currentDaily.sessions, date)
               const metric = (value: { count: number; average: number | null; mixed: boolean }) => value.count ? `${value.mixed ? 'Mixed' : value.average} (${value.count})` : '—'
               return <tr key={date}><th>{date === today ? 'Today' : date}</th><td>{day.listening.count ? `${day.listening.correct}/${day.listening.count}` : '—'}</td>
                 <td>{metric(day.production)}</td><td>{metric(day.transfer)}</td><td>{metric(day.recall)}</td><td>{day.repetitions}</td><td>{day.voices}</td></tr>
@@ -402,16 +392,17 @@ export function DailyPractice({ practice, dict }: Props) {
           {daily.sessions.slice(-7).reverse().map((item) => <details key={item.id} className="daily-session-detail">
             <summary>{item.dateKey} · {item.endedAt ? 'Completed' : 'Saved session'} · {item.routine?.events.length ?? item.reviewIds.length} results</summary>
             {item.routine ? <ul>{item.routine.events.map((event) => <li key={event.id}>
-              <span>{STAGES[event.kind].title} · {eventLabel(event)}{event.referenceHeard ? ' · reference heard' : ''}</span>
+              <span>{STAGES[event.kind].title} · {eventLabel(event.currentAssessment ? { ...event, ...event.currentAssessment } : event)}{event.referenceHeard ? ' · reference heard' : ''}</span>
+              {event.currentAssessment && <small>Recalculated · originally {event.overallScore ?? '—'}/100</small>}
               <p>{event.prompt}</p><small>{new Date(event.at).toLocaleTimeString()} {voices.find((voice) => voice.uri === event.voiceURI)?.name ?? event.voiceURI ?? ''}</small>
             </li>)}</ul> : <p>This earlier session has scheduling history only; listening and transfer were not measured.</p>}
           </details>)}
         </section>
         <section className="daily-deck-preview">
           <div className="daily-section-heading"><h2>Targets in rotation</h2><span>Up to two new targets per day</span></div>
-          {!daily.cards.length && <p className="daily-empty-copy">Daily builds your deck from repeated weak sounds and pinned trouble words in Practice Studio.</p>}
+          {!daily.cards.length && <p className="daily-empty-copy">Daily uses recurring sound flags, pinned words and flagged legacy recordings. Older takes can suggest practice without being counted as independent first takes.</p>}
           <div className="daily-card-list">{daily.cards.map((card) => <div key={card.id} className="daily-mini-card">
-            <span className="daily-mini-label">{card.label}</span><span className="daily-mini-meta">{card.totalReviews} scheduled reviews</span><span className="daily-mini-due">{formatDue(card)}</span>
+            <span className="daily-mini-label">{card.label}</span><span className="daily-mini-meta">{card.totalReviews} scheduled reviews</span><span className="daily-mini-due">{card.analysisInactive ? 'No current flag · history kept' : formatDue(card)}</span>
           </div>)}</div>
         </section>
         <details className="daily-method-details"><summary>Research and what these scores mean</summary>

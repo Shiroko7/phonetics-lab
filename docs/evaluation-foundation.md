@@ -4,6 +4,13 @@ Updated 2026-09-22. This milestone adds evaluation infrastructure and measured
 development baselines. It does **not** change the acoustic scorer, fit calibration,
 or demonstrate better word cuts. Roadmap phase 1 remains in progress.
 
+Follow-up, 2026-09-23: [automated validation](automated-validation.md) adds a
+calibration-selected review-cutoff experiment, speaker-bootstrap comparisons,
+diagnostics and boundary inference. The cutoff failed validation and was not
+adopted. A [real L2-ARCTIC boundary pilot](word-boundary-baseline.md) has also run:
+100 recordings, 24 speakers and 975 words. The historical assessment baseline tables
+below remain unchanged.
+
 ## Frozen speaker partitions
 
 The pinned speechocean762 revision has 125 speakers on each official side, with
@@ -136,7 +143,9 @@ corpus. Existing imports are never overwritten. The importer:
 - Selects files from each speaker's `annotation/` directory only, which the
   [provider documents](https://psi.engr.tamu.edu/l2-arctic-corpus-docs/) as manually
   corrected; never treats the automatic `textgrid/` directory as human gold.
-- Selects by fixed hash ranking and speaker round-robin before examining labels.
+- Selects by fixed speaker/filename hash ranking and speaker round-robin before examining labels.
+  Selection v2 varies prompts across speakers; `--selection v1` reproduces the
+  original filename-only ranking. Manifests record prompt/text diversity.
   Failed selected imports are recorded as exclusions, not replaced with easier ones.
 - Parses long-text Praat intervals strictly, checks word/transcript identity,
   corresponding WAV/transcript basenames, and WAV/TextGrid duration agreement
@@ -155,9 +164,12 @@ point tiers and the separate spontaneous suitcase recordings are not imported.
 Provider point boundaries do not supply independent-rater uncertainty ranges. This
 is development evidence, not a newly locked speaker-disjoint final corpus.
 
-Verification used original synthetic fixtures and an in-memory parse of the
-provider's public TextGrid example. **The full manual corpus has not been supplied
-or evaluated. No human word-boundary accuracy result is claimed yet.**
+Initial adapter verification used synthetic fixtures and the provider's public
+TextGrid example. The user has now supplied access to v5.0; all 3,599 manual
+annotations and matching audio/text are locally available. A frozen 100-recording
+pilot has been evaluated, with zero import exclusions. See the
+[human boundary results and limits](word-boundary-baseline.md). Full-corpus timing
+accuracy and improvements over the current scorer are not claimed.
 
 ### Boundary and playback metrics
 
@@ -165,9 +177,11 @@ or evaluated. No human word-boundary accuracy result is claimed yet.**
 npm run benchmark:boundaries:evaluate -- GOLD.jsonl PREDICTIONS.jsonl validation
 ```
 
-This evaluates existing prediction files. Producing predictions for the current
-app and candidate aligners on the imported recordings is the next comparison task;
-the importer itself does not run an aligner.
+This evaluates existing prediction files. `npm run benchmark:boundaries:run`
+produces current-app predictions; the local Qwen and MFA adapters produce candidate
+outputs; and `npm run benchmark:boundaries:compare` compares them with paired
+speaker-bootstrap intervals. See [commands and results](word-boundary-baseline.md#local-aligner-candidates).
+These adapters are research tooling; neither changes the app scorer automatically.
 
 The evaluator retains pronunciation and timing as independent labels:
 
@@ -190,14 +204,17 @@ The evaluator retains pronunciation and timing as independent labels:
 
 ## Next gates
 
-1. Supply a legally obtained manual corpus and inspect importer exclusions. Freeze
-   the selected rows; run the current timing/replay baseline on their original WAVs.
-2. Compare MFA/Qwen alignment candidates on the same rows, including failures,
-   clipped targets, neighbor leakage and latency. Add speaker-bootstrap intervals.
+1. **Initial boundary baseline complete.** Preserve the frozen v2 pilot (100
+   recordings / 24 speakers / 975 words) and its original-WAV predictions.
+2. Initial Qwen and Windows MFA 2.2.4 candidate comparisons are complete. Neither
+   is adopted because both materially increase neighboring speech in replay. Run MFA 3
+   on a supported platform, investigate boundary ownership/replay tradeoffs and inspect
+   worst cases before proposing a scorer or playback-policy change.
 3. Inspect calibration-side false flags and contextual American variants. Fit or
    change scoring only on development data, then compare on validation speakers.
-4. Add consented personal recordings and native-US controls with independent human
-   labels; public learner corpora alone cannot validate this user's coaching.
+4. For later claims about personal/native-US performance, commission independent
+   labels for consented recordings and controls. This is reviewer work, not learner
+   homework or a prerequisite for automated public-corpus development.
 5. Freeze candidate/configuration choices before explicitly releasing the final
    holdout. Prosody, variable-length pronunciation paths, reference excerpts and
    raw microphone capture remain separate roadmap work.

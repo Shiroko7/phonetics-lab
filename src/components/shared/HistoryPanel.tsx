@@ -1,4 +1,5 @@
 import { band, stamp, type PracticeState } from '../../lib/usePracticeState.ts'
+import { isRefreshed } from '../../lib/practice.ts'
 
 interface Props {
   practice: PracticeState
@@ -67,7 +68,12 @@ export function HistoryPanel({ practice, layout = 'compact' }: Props) {
                       </span>
                     )}
                     <span className="take-time">{stamp(attempt.at)}</span>
+                    <small>{isRefreshed(attempt) ? `Current · rev ${attempt.rev}` : 'Not recalculated'}</small>
                   </button>
+                  {attempt.originalAssessment && <details className="history-original-assessment">
+                    <summary>Original assessment</summary>
+                    <small>{attempt.originalAssessment.score.overall}/100 · {attempt.originalAssessment.scorer ?? 'browser'} · revision {attempt.originalAssessment.rev ?? 0}. Current score shown above; original audio is unchanged.</small>
+                  </details>}
                   <button
                     className="take-delete-btn"
                     onClick={() => removeAttempt(index)}

@@ -17,6 +17,7 @@ import { Vowels } from './Vowels.tsx'
 import { formatIPA } from '../lib/display.ts'
 import { DailyPractice } from './DailyPractice.tsx'
 import { StatsSummary } from './StatsSummary.tsx'
+import { HistoryRecalculation } from './shared/HistoryRecalculation.tsx'
 
 interface Props {
   view: 'practice' | 'daily' | 'lookup' | 'vowels' | 'stats'
@@ -158,6 +159,8 @@ export function SplitLab({
           </button>
         </div>
       </header>
+
+      <HistoryRecalculation practice={practice} />
 
       {/* DUAL DECK WORKSPACE */}
       <main className="split-stage-container">
