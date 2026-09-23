@@ -216,6 +216,11 @@ baseline and rater disagreement; do not invent a validated target from synthetic
   clipping but raised neighboring-speech leakage from 1.9 ms/replay to 17.4–22.8 ms.
   Qwen left 73 of 975 words without a positive-width interval. Neither candidate is
   selected. See [paired results and limitations](word-boundary-baseline.md#local-aligner-candidates).
+- **Replay trim sweep complete; no default selected.** A 20 ms inward trim reduced
+  neighbor leakage for both candidates, but clipped about 28 ms more target speech;
+  larger trims sharply reduced leakage while clipping more target sounds and making
+  some clips unavailable. Acoustic timestamps and error did not change. See the
+  [full sweep](word-boundary-baseline.md#replay-trim-sweep).
 - **MFA 3 US English** remains the intended comparison, but Windows conda-forge
   supplied MFA 2.2.4 only. The measured MFA result is labeled 2.2.4, not 3; the
   3.x run requires a supported platform. Its authors'
@@ -227,10 +232,10 @@ baseline and rater disagreement; do not invent a validated target from synthetic
   checkpoint revision, GPU, timing coverage and latency. It does not provide a
   validated pronunciation grade merely by aligning text.
 
-Next, inspect the worst cases and test how phone/word ownership, uncertainty and
-playback trims affect both neighbors and target coverage. Keep acoustic boundaries
-separate from playable intervals; do not choose wider spans solely for lower mean
-error. Only then propose API provenance/confidence changes and test an MFA 3 run.
+Next, inspect the worst cases and test phone/word ownership and uncertainty. Keep
+acoustic boundaries separate from playable intervals; do not choose a trim from this
+development sweep alone or choose wider spans solely for lower mean error. Only then
+propose API provenance/confidence changes and test an MFA 3 run.
 
 The response should distinguish word acoustic spans, playback spans, token spans,
 ownership and alignment reliability. Preserve word boundaries without forcing a shared

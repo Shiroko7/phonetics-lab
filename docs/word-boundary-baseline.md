@@ -145,6 +145,42 @@ work tests boundary ownership/context and replay policy together, investigates M
 on a supported platform, and checks the worst cases. Do not infer pronunciation
 correctness from any of these time-alignment measurements.
 
+## Replay trim sweep
+
+An offline sweep applies symmetric inward trims of 0, 20, 40, 60 and 80 ms to the
+candidate playback intervals, then uses the app's sample-rounded playback function.
+It never changes candidate acoustic timestamps or boundary-error scores. Results
+below are pooled across the same 975 annotated words; paired intervals resample the
+24 speakers. Reports and input hashes are kept locally in the ignored candidate run
+directories as `trim-sweep.json`.
+
+| Candidate / trim | Mean neighbor included | Clips with neighbor speech | Mean target clipped | Replay coverage |
+| --- | ---: | ---: | ---: | ---: |
+| Qwen / 0 ms | 22.8 ms | 53.0% | 60.9 ms | 92.5% |
+| Qwen / 20 ms | 12.1 ms | 34.4% | 88.6 ms | 92.5% |
+| Qwen / 40 ms | 6.4 ms | 20.9% | 118.3 ms | 82.8% |
+| Qwen / 60 ms | 2.8 ms | 9.7% | 154.5 ms | 82.8% |
+| Qwen / 80 ms | 1.6 ms | 4.3% | 192.8 ms | 64.8% |
+| MFA 2.2.4 / 0 ms | 17.4 ms | 53.6% | 22.8 ms | 100.0% |
+| MFA 2.2.4 / 20 ms | 7.9 ms | 16.3% | 50.8 ms | 99.7% |
+| MFA 2.2.4 / 40 ms | 5.2 ms | 7.1% | 84.5 ms | 96.0% |
+| MFA 2.2.4 / 60 ms | 4.3 ms | 3.8% | 119.0 ms | 88.2% |
+| MFA 2.2.4 / 80 ms | 3.8 ms | 2.8% | 154.7 ms | 80.7% |
+
+At 20 ms, the paired speaker-bootstrap change in mean neighbor speech was
+−10.7 ms for Qwen (95% interval −11.3 to −10.1) and −9.5 ms for MFA (−10.3 to
+−8.8). Mean target clipping rose by 27.7 ms (27.1 to 28.3) and 28.0 ms (27.0 to
+28.8), respectively. Qwen's replay coverage did not change at 20 ms; MFA's fell by
+0.3 percentage points. Mean boundary error and timing coverage are unchanged at
+every trim, by design. These are interval-overlap metrics, not judgments of audible
+intelligibility. The sweep quantifies a tradeoff on this development sample; it does
+not establish a universally suitable trim or justify changing the app default.
+
+Reproduce the analysis with `npm run benchmark:boundaries:trim -- GOLD.jsonl
+PREDICTIONS.jsonl NEW_REPORT.json`. The output must be a new file under local
+`datasets/`; final/test splits are refused. The synthetic policy check is part of
+`npm run check:benchmark`.
+
 All downloaded model/data files, copied benchmark audio, partial logs and prediction
 outputs remain under ignored `datasets/`. The downloaded model versions, checksums,
 and candidate report paths are in their respective local `run.json` and comparison

@@ -148,3 +148,11 @@ rejection on lost recall, boundary conversion, refusal coverage, changed inputs,
 path escapes and incomplete runs using original synthetic fixtures. `npm run check`
 includes it. The Daily browser regression now separately checks immutable event
 evidence and derived analysis, and passes the complete simulated flow.
+
+For development-only replay experiments, run `npm run
+benchmark:boundaries:trim -- GOLD.jsonl PREDICTIONS.jsonl NEW_REPORT.json` for
+sample-rounded symmetric inward trims. The report keeps acoustic estimates fixed,
+measures leakage, target clipping and replay coverage together, and includes paired
+speaker-bootstrap changes from untrimmed intervals. It refuses final/test splits
+and writes only new reports under ignored `datasets/`. This is descriptive evidence,
+not an automatic policy selector; no trim is deployed from the sweep alone.
