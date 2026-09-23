@@ -136,7 +136,12 @@ Worst-case inspection found one MFA 2.2.4 recording (`MBMPS/arctic_a0212`) with
 about 815 ms mean boundary error: after a pause, the alignment jumps roughly 1.2 s
 early and stays offset, even though all transcript words match and nominal coverage
 is 100%. This is why token identity and aggregate coverage cannot serve as an
-alignment-confidence check by themselves.
+alignment-confidence check by themselves. In the manual-boundary comparison, the
+candidate is already about 0.7 s early at “walk” and about 1.1 s early from “they”
+onward. Qwen on the same recording leaves the short article “the” untimed; on another
+high-error recording (`HQTV/arctic_a0127`), it times only 6 of 8 words. This is a
+comparison against expert-corrected timestamps, not a new
+independent listening adjudication of those specific clips.
 
 **Decision:** neither candidate is a safe default change. Both improve target
 coverage, but their replay clips pull in substantially more adjacent words. Qwen
@@ -144,6 +149,11 @@ also abstains on 7.5% of words. Keep the current scorer while the next alignment
 work tests boundary ownership/context and replay policy together, investigates MFA 3
 on a supported platform, and checks the worst cases. Do not infer pronunciation
 correctness from any of these time-alignment measurements.
+
+The follow-up failure inspection supports two explicit checks for future candidates:
+detect persistent timing offsets after pauses, and retain word-level abstention in
+coverage rather than hiding it behind recording-level success. MFA 3 still needs a
+supported Linux environment; this Windows host has no WSL or Docker installation.
 
 ## Replay trim sweep
 

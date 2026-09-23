@@ -221,6 +221,10 @@ baseline and rater disagreement; do not invent a validated target from synthetic
   larger trims sharply reduced leakage while clipping more target sounds and making
   some clips unavailable. Acoustic timestamps and error did not change. See the
   [full sweep](word-boundary-baseline.md#replay-trim-sweep).
+- **Worst-case inspection complete.** MFA 2.2.4 can drift by more than a second after
+  a pause while retaining 100% timing coverage; Qwen can leave short words unaligned.
+  Candidate evaluation must check persistent offsets and report word-level abstention.
+  See the concrete example in the [boundary baseline](word-boundary-baseline.md#local-aligner-candidates).
 - **MFA 3 US English** remains the intended comparison, but Windows conda-forge
   supplied MFA 2.2.4 only. The measured MFA result is labeled 2.2.4, not 3; the
   3.x run requires a supported platform. Its authors'
@@ -232,10 +236,10 @@ baseline and rater disagreement; do not invent a validated target from synthetic
   checkpoint revision, GPU, timing coverage and latency. It does not provide a
   validated pronunciation grade merely by aligning text.
 
-Next, inspect the worst cases and test phone/word ownership and uncertainty. Keep
-acoustic boundaries separate from playable intervals; do not choose a trim from this
-development sweep alone or choose wider spans solely for lower mean error. Only then
-propose API provenance/confidence changes and test an MFA 3 run.
+Next, test drift detection and phone/word ownership on development data, then run MFA 3
+on a supported Linux platform. Keep acoustic boundaries separate from playable
+intervals; do not choose a trim from this development sweep alone or choose wider
+spans solely for lower mean error. Only then propose API provenance/confidence changes.
 
 The response should distinguish word acoustic spans, playback spans, token spans,
 ownership and alignment reliability. Preserve word boundaries without forcing a shared
