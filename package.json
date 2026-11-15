@@ -2,7 +2,9 @@
   "name": "phonetics-lab",
   "private": true,
   "license": "Apache-2.0",
-  "engines": { "node": ">=22.18.0" },
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "version": "0.1.0",
   "type": "module",
   "description": "Paste English text, get IPA phonetics on hover plus pronunciation audio.",
@@ -47,6 +49,6 @@
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^10.0.5",
     "typescript": "~5.9.3",
-    "vite": "^8.0.12"
+    "vite": "^8.3.8"
   }
 }

@@ -6,8 +6,7 @@ description = "Forced-alignment and goodness-of-pronunciation scoring for phonet
 requires-python = ">=3.12"
 
 dependencies = [
-    "torch>=2.7",
-    "torchaudio>=2.7",
+    "torch>=2.13,<2.14",
     "transformers>=4.44",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
@@ -19,16 +18,15 @@ dependencies = [
 ]
 
 # Blackwell (RTX 50xx) is compute capability sm_120. The default PyPI wheels are
-# built against an older CUDA that has no kernels for it, so the GPU loads and
-# then fails at the first matmul. cu128 is the floor for this card.
+# built against an older CUDA that has no kernels for it. CUDA 13.0 provides
+# patched PyTorch 2.13 wheels and supports this card with driver 580 or newer.
 [[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
-torch = [{ index = "pytorch-cu128" }]
-torchaudio = [{ index = "pytorch-cu128" }]
+torch = [{ index = "pytorch-cu130" }]
 
 [tool.uv]
 package = false
