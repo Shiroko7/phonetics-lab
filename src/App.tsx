@@ -242,6 +242,7 @@ export default function App() {
             setDrillSound(phone)
             setView('practice')
           }}
+          onStartFocusedDrill={practice.startFocusedDrill}
           dict={dict}
         />
       )}

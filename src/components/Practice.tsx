@@ -942,7 +942,7 @@ export function Practice({
   /** How the sounds this line was chosen for actually went, in this take. */
   const focus = useMemo(
     () =>
-      aligned && step && onStep ? focusScore(aligned, step.covers.map((hit) => hit.phone)) : [],
+      aligned && step && onStep ? focusScore(aligned, step.covers) : [],
     [aligned, step, onStep],
   )
 

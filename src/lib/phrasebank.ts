@@ -101,7 +101,9 @@ export function phrasesFor(
 /** One line of a session, and which of the requested sounds it exercises. */
 export interface DrillStep {
   phrase: DrillPhrase
-  covers: { phone: string; count: number }[]
+  covers: { phone: string; count: number; indices?: number[] }[]
+  /** Explicit words chosen for focused-history drills. */
+  focusWords?: { word: string; phones: string[] }[]
 }
 
 export interface DrillSet {

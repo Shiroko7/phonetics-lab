@@ -234,10 +234,17 @@ export interface FocusReport {
  * in it are only there to carry the one that matters. "/ɔ/ 3 of 4" is the
  * answer to what was asked; the overall score is context.
  */
-export function focusScore(aligned: AlignedPhone[], phones: string[], threshold = DEFAULT_PRACTICE_THRESHOLD): FocusReport[] {
-  return phones
-    .map((phone) => {
-      const steps = aligned.filter((step) => step.expected === phone)
+export function focusScore(
+  aligned: AlignedPhone[],
+  targets: (string | { phone: string; indices?: number[] })[],
+  threshold = DEFAULT_PRACTICE_THRESHOLD,
+): FocusReport[] {
+  return targets
+    .map((target) => {
+      const phone = typeof target === 'string' ? target : target.phone
+      const indices = typeof target === 'string' ? undefined : target.indices
+      const steps = aligned.filter((step) => step.expected === phone &&
+        (!indices || (step.expectedIndex !== null && indices.includes(step.expectedIndex))))
       return {
         phone,
         seen: steps.length,

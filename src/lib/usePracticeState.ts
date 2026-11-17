@@ -6,6 +6,7 @@ import {
   type AlignedPhone, type Heard,
 } from './align.ts'
 import { describeSubstitution } from './phonefeatures.ts'
+import { analyzeStats } from './analytics.ts'
 import {
   buildInfo, demote, loadRecognizer, loadTranscriber, prewarm, type LoadState,
 } from './asr.ts'
@@ -27,6 +28,7 @@ import {
   type Change, type WordReport,
 } from './report.ts'
 import { drillIndex, type Drill, type DrillIndex } from './drills.ts'
+import { buildFocusedDrill } from './focusedDrill.ts'
 import {
   buildDrill, phraseIndex, type DrillPhrase, type DrillSet,
 } from './phrasebank.ts'
@@ -37,7 +39,7 @@ import {
   togglePinnedWord, addManualWord, isStrugglingLot,
   buildDrillForWord, buildDrillForStruggledWords, type StruggledWord,
 } from './struggles.ts'
-import { clearDailyState } from './daily.ts'
+import { clearDailyState, loadDailyState } from './daily.ts'
 import { playbackSlice } from './playback.ts'
 import { alignWordVariants } from './wordAlignment.ts'
 import { decisionsFor, emptyPracticePreferences, loadPracticePreferences, normalizeThreshold, savePracticePreferences,
@@ -96,6 +98,7 @@ export function usePracticeState({
     | { type: 'sounds'; sounds: string[] }
     | { type: 'word'; word: StruggledWord }
     | { type: 'trouble' }
+    | { type: 'focused' }
     | null
   >(null)
   const [stepAt, setStepAt] = useState(0)
@@ -105,6 +108,12 @@ export function usePracticeState({
   useEffect(() => savePracticePreferences(practicePreferences), [practicePreferences])
   const review = useMemo(() => reviewHistory(attempts, dict ?? new Map(), practicePreferences, savedStruggles), [attempts, dict, practicePreferences, savedStruggles])
   const struggles = review.bank
+  const focusedPhones = useMemo(() => {
+    if (!dict) return []
+    return analyzeStats(attempts, struggles, loadDailyState(), 'all', undefined, undefined, dict).problemPhones
+      .filter((stat) => stat.errorRate >= 25 && stat.seen >= 3 && stat.phone in PHONES && stat.phone !== 'ɾ' && stat.phone !== 'ʔ')
+      .map((stat) => stat.phone)
+  }, [attempts, struggles, dict])
   const setPracticeThreshold = useCallback((value: number) => setPracticePreferences((old) => ({ ...old, threshold: normalizeThreshold(value) })), [])
   const [troubleFilter, setTroubleFilter] = useState<'all' | 'struggles' | 'pinned'>('all')
   const [troubleSearch, setTroubleSearch] = useState('')
@@ -795,8 +804,39 @@ export function usePracticeState({
     )
   }, [struggles, phrases, dict, text, attempts, stepTo])
 
+  const startFocusedDrill = useCallback(async () => {
+    if (!dict) return
+    if (focusedPhones.length === 0) {
+      setError('No persistent problem sounds are available from your history yet. Record a few practice takes first.')
+      return
+    }
+
+    let commonRanks = new Map<string, number>()
+    try {
+      const common = await drillIndex(dict)
+      commonRanks = new Map(common.entries.map((entry) => [entry.word, entry.rank]))
+    } catch {
+      // The sentence bank and dictionary are enough to build this drill.
+    }
+    const built = buildFocusedDrill(focusedPhones, dict, commonRanks, undefined, { randomize: true })
+    if (built.steps.length === 0) {
+      setError('Could not find checked carrier sentences for the sounds in your history.')
+      return
+    }
+    setSession(built)
+    setSessionSource({ type: 'focused' })
+    setPicked(focusedPhones)
+    stepTo(0, built)
+    setError(built.missing.length > 0
+      ? `Could not find checked words for /${built.missing.join('/, /')}/.`
+      : null)
+    requestAnimationFrame(() => drillPanel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }, [dict, focusedPhones, stepTo])
+
   const shuffleCurrentDrill = useCallback(() => {
-    if (sessionSource?.type === 'word') {
+    if (sessionSource?.type === 'focused') {
+      void startFocusedDrill()
+    } else if (sessionSource?.type === 'word') {
       drillWord(sessionSource.word)
     } else if (sessionSource?.type === 'trouble') {
       drillAllTrouble()
@@ -806,7 +846,7 @@ export function usePracticeState({
       const fallbackSounds = session.steps.flatMap((s) => s.covers.map((c) => c.phone))
       if (fallbackSounds.length > 0) startDrill([...new Set(fallbackSounds)])
     }
-  }, [sessionSource, session, drillWord, drillAllTrouble, startDrill])
+  }, [sessionSource, session, startFocusedDrill, drillWord, drillAllTrouble, startDrill])
 
   const endDrill = useCallback(() => {
     setSession(null)
@@ -879,7 +919,7 @@ export function usePracticeState({
   const onStep = !!step && sameLine(step.phrase.text, target)
   const focus = useMemo(
     () =>
-      aligned && step && onStep ? focusScore(aligned, step.covers.map((hit) => hit.phone), practiceThreshold) : [],
+      aligned && step && onStep ? focusScore(aligned, step.covers, practiceThreshold) : [],
     [aligned, step, onStep, practiceThreshold],
   )
 
@@ -914,7 +954,7 @@ export function usePracticeState({
     playing, played, opened, setOpened,
     drills, editing, setEditing, clips, against, setAgainst,
     session, sessionSource, stepAt,
-    struggles, troubleFilter, setTroubleFilter,
+    struggles, focusedPhones, troubleFilter, setTroubleFilter,
     troubleSearch, setTroubleSearch,
     newWordInput, setNewWordInput, newWordError, setNewWordError,
     picked, browsing, setBrowsing,
@@ -930,7 +970,7 @@ export function usePracticeState({
     clearHistory: handleClearHistory,
     resetAllData,
     reopen, removeAttempt, again, setLine, practise, sayPhrase,
-    stepTo, startDrill, drillWord, practiseWord, drillAllTrouble, shuffleCurrentDrill, endDrill,
+    stepTo, startDrill, startFocusedDrill, drillWord, practiseWord, drillAllTrouble, shuffleCurrentDrill, endDrill,
     handleAddWord, removeWord, togglePin, clearTroubles, toggleSound,
     display,
     attempts,

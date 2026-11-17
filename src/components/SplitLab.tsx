@@ -45,6 +45,7 @@ interface Props {
   onPreviewVoice: () => void
   onSay: (word: string) => void
   onPractisePhone: (phone: string) => void
+  onStartFocusedDrill: () => void
   dict: Dictionary
 }
 
@@ -74,6 +75,7 @@ export function SplitLab({
   onPreviewVoice,
   onSay,
   onPractisePhone,
+  onStartFocusedDrill,
   dict,
 }: Props) {
   const [rightDeckTab, setRightDeckTab] = useState<RightDeckTab>('diagnostics')
@@ -123,6 +125,16 @@ export function SplitLab({
             onClick={() => setView('daily')}
           >
             Daily Practice
+          </button>
+          <button
+            className="split-tab-btn focused-drill-tab"
+            onClick={() => {
+              setView('practice')
+              onStartFocusedDrill()
+            }}
+            title="Practice every persistent problem sound from your history in ordinary sentences"
+          >
+            Focused Drill{practice.focusedPhones.length > 0 ? ` (${practice.focusedPhones.length})` : ''}
           </button>
           <button
             className={`split-tab-btn ${view === 'lookup' ? 'active' : ''}`}
